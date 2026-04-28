@@ -1,0 +1,70 @@
+# Cassandra Backup Configuration – DSE 6.8.36
+# Used by all backup scripts in scripts/cassandra/backup/
+
+cassandra:
+  dse_version: "6.8.36"
+  cqlsh_host: "127.0.0.1"
+  cqlsh_port: 9042
+  data_dir: "/var/lib/cassandra/data"
+  commitlog_dir: "/var/lib/cassandra/commitlog"
+  schema_backup_dir: "/var/lib/cassandra/schema_backups"
+  snapshot_base_dir: "/var/lib/cassandra/snapshots_export"
+
+# Nodes per environment – update with actual IPs/hostnames
+environments:
+  development:
+    datacenter: "dc-dev"
+    nodes:
+      - "cass-dev-node1"
+      - "cass-dev-node2"
+      - "cass-dev-node3"
+    retention_days: 30
+
+  preproduction:
+    datacenter: "dc-preprod"
+    nodes:
+      - "cass-preprod-node1"
+      - "cass-preprod-node2"
+      - "cass-preprod-node3"
+    retention_days: 30
+
+  production:
+    datacenter: "dc-prod-primary"   # CPD from which backups are taken
+    nodes:
+      - "cass-prod-node1"
+      - "cass-prod-node2"
+      - "cass-prod-node3"
+      - "cass-prod-node4"
+      - "cass-prod-node5"
+      - "cass-prod-node6"
+    retention_days: 30
+    archive:
+      frequency: "semiannual"       # January and July
+      retention_years: 10
+      archive_dir: "/mnt/longterm_archive/cassandra"
+
+backup:
+  daily_snapshot:
+    schedule: "0 1 * * *"           # 01:00 every day
+    snapshot_name_prefix: "daily"
+
+  commitlog:
+    schedule: "0 * * * *"           # every hour
+    retention_days: 30
+
+  schema:
+    schedule: "0 1 * * *"           # 01:00 every day (runs before snapshot)
+    retention_days: 30
+
+cohesity:
+  # Cohesity picks up snapshot_base_dir and schema_backup_dir after scripts run
+  protection_policy: "cassandra-daily-30d"
+  source_paths:
+    - "/var/lib/cassandra/snapshots_export"
+    - "/var/lib/cassandra/schema_backups"
+    - "/var/lib/cassandra/commitlog"
+  notification_email: "dba-team@bank.internal"
+
+logging:
+  log_dir: "/var/log/cassandra/backup"
+  log_level: "INFO"
