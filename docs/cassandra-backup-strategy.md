@@ -1,229 +1,119 @@
 # 3.7.2 Estrategia de backup y recuperación – Cassandra
 
-**Producto:** DataStax Enterprise (DSE) 6.8.36  
-**OS:** Linux  
-**Sistema integrado:** IFM (Windows)  
-**Herramienta de backup:** Cohesity (corporativa) – integración por pickup de ficheros
+Este apartado describe la estrategia de backup, retención y recuperación de la base de datos Cassandra (DataStax Enterprise 6.8.36) utilizada para el almacenamiento de perfiles de los clientes de la entidad bancaria.
+
+A continuación, se detalla la arquitectura de Cassandra por entorno:
+
+| Entorno        | Nodos |
+|----------------|-------|
+| Desarrollo     | 3     |
+| Pre-producción | 3     |
+| Producción     | 6     |
 
 ---
 
-## Herramienta nativa de backup: `nodetool snapshot`
+## Mecanismo de protección de datos
 
-Cassandra no dispone de un mecanismo de exportación tipo `mysqldump`. Su herramienta nativa de backup es **`nodetool snapshot`**, que genera una imagen consistente de los datos en disco sin detener el servicio.
+La protección de datos de Cassandra se realizará mediante la herramienta corporativa **Cohesity**, actuando como sistema de almacenamiento y gestión de retención de los paquetes de backup.
 
-### Cómo funciona internamente
+Dado que Cassandra es una base de datos CQL distribuida, el backup se diseñará a nivel de clúster, protegiendo todos los nodos que lo componen. El proceso se ejecutará de forma consistente desde un único CPD seleccionado (CPD primario), dado que Cassandra replica los datos entre CPDs.
 
-Cassandra persiste los datos en ficheros binarios denominados **SSTables**:
+### Modelo de integración con Cohesity
 
-```
-/var/lib/cassandra/data/
-  └── keyspace_ifm/
-        └── tabla_clientes-a1b2c3/   ← tabla con UUID interno
-              ├── mc-1-big-Data.db    ← datos
-              ├── mc-1-big-Index.db   ← índice
-              └── mc-1-big-Filter.db  ← bloom filter
-```
+La integración entre Cassandra y Cohesity se realizará mediante un modelo de **entrega de ficheros** (*file pickup*), sin integración nativa entre ambas plataformas. Este modelo funciona de la siguiente manera:
 
-`nodetool snapshot` crea **hard links** (instantáneos, sin duplicar datos en disco) a los SSTables activos bajo un directorio `snapshots/<tag>/`. Esos ficheros pueden copiarse y empaquetarse mientras Cassandra sigue operativa.
-
-### Dos capas imprescindibles para restaurar
-
-| Capa | Contenido | Herramienta |
-|------|-----------|-------------|
-| **Esquema CQL** | Keyspaces, tablas, columnas, índices, PKs | `cqlsh DESCRIBE FULL SCHEMA` |
-| **Datos** | SSTables (binario, formato propietario Cassandra) | `nodetool snapshot` |
-
-Ambas capas deben restaurarse juntas y en ese orden: primero el esquema (para que existan las tablas), después los datos. Si falta alguna, la restauración es inviable.
-
----
-
-## Arquitectura del clúster
-
-Cassandra opera en topología **activo-activo** distribuida en dos CPDs. Los datos se replican automáticamente entre CPDs, garantizando continuidad ante la caída completa de un CPD.
-
-| Entorno        | Nodos | Retención diaria |
-|----------------|-------|-----------------|
-| Desarrollo     | 3     | 30 días         |
-| Pre-producción | 3     | 30 días         |
-| Producción     | 6     | 30 días         |
-
-El backup se ejecuta en los nodos del **CPD primario** únicamente. Al ser una arquitectura replicada, esta copia es representativa del estado completo del clúster.
-
----
-
-## Integración con Cohesity – modelo pickup de ficheros
-
-No se utiliza la integración nativa Cohesity↔Cassandra (que requiere nodos de cómputo Cohesity). En su lugar, los scripts producen paquetes `.tar.gz` auto-contenidos que Cohesity recoge de un directorio de entrega:
+1. Las herramientas nativas de Cassandra (`nodetool` y `cqlsh`) generan en cada nodo un paquete de backup auto-contenido en formato `.tar.gz`.
+2. Dicho paquete incluye tanto el esquema CQL como los datos (SSTables), y se deposita en un directorio de entrega compartido accesible por Cohesity.
+3. Cohesity recoge los paquetes de ese directorio y los almacena aplicando las políticas de retención y deduplicación definidas.
 
 ```
 Nodo Cassandra (Linux)                         Cohesity
-──────────────────────────────                 ─────────
-                                               
-1. cqlsh DESCRIBE FULL SCHEMA                  
-2. nodetool flush                              
-3. nodetool snapshot                           
-4. cp SSTables → staging/                     
-5. tar -czf cassandra_backup_*.tar.gz          
-6. mv *.tar.gz → /mnt/cohesity_pickup/  ──►  Cohesity recoge,
-                                              almacena y gestiona
-                                              retención / dedup
+──────────────────────────────────             ─────────────────────────
+1. cqlsh → exporta esquema CQL
+2. nodetool flush + snapshot → datos
+3. Empaqueta en .tar.gz con SHA-256
+4. Deposita en /mnt/cohesity_pickup/  ──────►  Recoge, almacena y gestiona
+                                               retención según política
 ```
 
-Cada paquete `.tar.gz` contiene:
+Cada paquete `.tar.gz` es auto-contenido e incluye:
 
-```
-cassandra_backup_<nodo>_<timestamp>/
-├── schema/
-│   └── schema.cql          ← DESCRIBE FULL SCHEMA completo
-├── data/
-│   └── <keyspace>/
-│       └── <tabla-uuid>/   ← SSTables de cada tabla
-│             ├── mc-1-big-Data.db
-│             └── ...
-└── manifest.json           ← metadatos (nodo, timestamp, DSE version, keyspaces)
-```
+- **Esquema CQL**: definición completa de keyspaces, tablas, columnas, índices y claves primarias, obtenida mediante `DESCRIBE FULL SCHEMA` en `cqlsh`. Es imprescindible para restauraciones completas desde cero, ya que los datos en formato SSTable no pueden recuperarse sin conocer previamente la estructura de las tablas.
+- **Datos**: ficheros SSTable generados por `nodetool snapshot`, que constituyen una imagen consistente y punto en el tiempo de todos los datos del nodo.
+- **Manifiesto**: fichero de metadatos con información del nodo, timestamp, versión de DSE y keyspaces incluidos.
 
 ---
 
 ## Tipos de backup
 
-### 1. Backup diario – snapshot completo
+### Backup diario (equivalente al backup full)
 
-| Parámetro    | Valor |
-|--------------|-------|
-| Frecuencia   | Diaria – 01:00 |
-| Contenido    | Esquema CQL + SSTables de todos los keyspaces |
-| Retención    | 30 días |
-| Pickup dir   | `/mnt/cohesity_pickup/cassandra/daily/` |
-| Script       | `scripts/cassandra/backup/daily_snapshot.sh` |
+Se realizará un snapshot consistente de Cassandra en todos los nodos del clúster de manera diaria, garantizando una imagen coherente del clúster. El proceso no requiere detener el servicio.
 
-Flujo del script:
-1. Exporta `DESCRIBE FULL SCHEMA` a `schema/schema.cql`
-2. Ejecuta `nodetool flush` (vuelca memtables)
-3. Ejecuta `nodetool snapshot --tag daily_<timestamp>`
-4. Copia los SSTables del snapshot a un directorio de staging
-5. Elimina el snapshot in-place de Cassandra (libera disco)
-6. Genera `manifest.json` con metadatos
-7. Empaqueta todo en `cassandra_backup_<nodo>_<timestamp>.tar.gz` + SHA-256
-8. Mueve el paquete a `/mnt/cohesity_pickup/cassandra/daily/`
-9. Purga paquetes locales con más de 30 días
+La herramienta nativa utilizada es `nodetool snapshot`, que genera una imagen de los SSTables en disco mediante hard links, combinada con la exportación del esquema CQL mediante `cqlsh`. Ambos elementos se empaquetan juntos en un único fichero `.tar.gz` por nodo.
 
-### 2. Backup de commit logs – backup de cambios
+El periodo de retención será de **30 días** para los tres entornos (desarrollo, pre-producción y producción).
 
-| Parámetro  | Valor |
-|------------|-------|
-| Frecuencia | Cada hora |
-| Contenido  | Segmentos `CommitLog-*.log` sellados |
-| Retención  | 30 días |
-| RPO        | ≈ 1 hora |
-| Pickup dir | `/mnt/cohesity_pickup/cassandra/commitlogs/` |
-| Script     | `scripts/cassandra/backup/commitlog_backup.sh` |
+### Backup de cambios (equivalente al backup de logs)
 
-El script ejecuta `nodetool flush` para sellar el segmento activo y luego copia todos los segmentos `CommitLog-*.log` a un paquete `.tar.gz`. Combinado con el snapshot diario, permite recuperación a un punto en el tiempo (PITR).
+Se realizará una copia de seguridad de los commit logs de Cassandra con una frecuencia de **1 hora** y un periodo de retención de **30 días**. Los commit logs registran todas las escrituras recibidas por el nodo y permiten, combinados con el snapshot diario, recuperar el estado de la base de datos en cualquier punto intermedio.
 
-### 3. Backup del esquema CQL (standalone)
+Este mecanismo reduce la pérdida máxima de datos en caso de incidente, estableciendo un **RPO aproximado de 1 hora**.
 
-| Parámetro  | Valor |
-|------------|-------|
-| Frecuencia | Diaria – 00:50 |
-| Contenido  | Salida de `DESCRIBE FULL SCHEMA` comprimida con gzip |
-| Retención  | 30 días |
-| Pickup dir | `/mnt/cohesity_pickup/cassandra/schema/` |
-| Script     | `scripts/cassandra/backup/schema_backup.sh` |
+### Backup del esquema CQL
 
-El esquema ya va embebido dentro del paquete diario. Este script standalone existe para restauraciones de esquema rápidas sin necesidad de desempaquetar el backup completo.
+Adicionalmente al esquema embebido en cada paquete diario, se realizará una exportación independiente del esquema CQL con frecuencia diaria. Esta copia standalone permite restaurar o auditar la estructura de la base de datos sin necesidad de desempaquetar el backup completo de datos.
 
-### 4. Archivado semestral de largo plazo (solo producción)
+### Retención y archivado en el entorno de producción
 
-| Parámetro  | Valor |
-|------------|-------|
-| Frecuencia | Semestral (1 enero y 1 julio – 02:00) |
-| Contenido  | Snapshot completo + esquema CQL |
-| Retención  | 10 años (política en Cohesity) |
-| Pickup dir | `/mnt/cohesity_pickup/cassandra/archive/` |
-| Script     | `scripts/cassandra/backup/semiannual_archive.sh` |
-
-Mismo proceso que el diario pero con tag `archive_<timestamp>`. Incluye SHA-256 para verificación de integridad. La retención de 10 años se configura en la política de almacenamiento de Cohesity.
+Se establecerá un archivado de largo plazo con frecuencia **semestral** (1 de enero y 1 de julio) y retención de **10 años**. Cada archivo contendrá un snapshot completo de los datos y del esquema CQL, empaquetado en formato `.tar.gz` con checksum SHA-256 para verificación de integridad. La política de retención de 10 años será gestionada por Cohesity en el nivel de almacenamiento.
 
 ---
 
-## Estrategia de recuperación ante desastres (producción)
+## Estrategia de recuperación ante desastres en producción
 
-### Caso 1 – Error lógico (borrado accidental / corrupción de datos)
+### Errores lógicos (borrados accidentales, corrupción de datos)
 
-```bash
-# Solo snapshot (estado al inicio del día)
-restore_snapshot.sh \
-  --package /mnt/cohesity_pickup/cassandra/daily/cassandra_backup_node1_20260428_010000.tar.gz
+Se restaurará el paquete de snapshot más reciente anterior al incidente, que incluye el esquema y los datos. Si se requiere recuperación a un punto en el tiempo exacto (PITR), se reaplicarán los paquetes de commit logs desde el snapshot hasta el momento previo al incidente, utilizando la capacidad nativa de Cassandra de reproducción de commit logs con punto de parada configurable.
 
-# Con PITR (recupera hasta el momento previo al incidente)
-restore_snapshot.sh \
-  --package /mnt/cohesity_pickup/cassandra/daily/cassandra_backup_node1_20260428_010000.tar.gz \
-  --commitlogs /mnt/cohesity_pickup/cassandra/commitlogs \
-  --target-time "2026-04-28T09:30:00"
-```
+### Caída completa de CPD
 
-El script:
-1. Extrae el `.tar.gz`
-2. Detiene Cassandra
-3. Restaura el esquema CQL vía `cqlsh`
-4. Copia los SSTables al directorio de datos
-5. Si se indica `--commitlogs`, aplica los segmentos de commit log hasta `--target-time`
-6. Arranca Cassandra y lanza `nodetool repair` para sincronizar réplicas
-
-### Caso 2 – Caída completa de un CPD
-
-No requiere restauración. La arquitectura activo-activo garantiza continuidad: el CPD restante sigue operativo. Al recuperarse el CPD caído, Cassandra sincroniza los nodos automáticamente mediante `hinted handoff` y `read repair`.
+Si el CPD restante continúa operativo, no será necesario realizar restauración alguna. La arquitectura activo-activo de Cassandra garantiza la continuidad del servicio desde el CPD disponible. Una vez recuperado el CPD caído, Cassandra sincroniza los nodos automáticamente.
 
 ---
 
-## Planificación de tareas (cron)
+## Requisitos a validar con el equipo de backup
 
-```
-# Schema standalone – 00:50 diario
-50 0 * * *   cassandra  /opt/cassandra/backup/schema_backup.sh
+Para asegurar el correcto funcionamiento de esta estrategia, el equipo de backup deberá validar los siguientes puntos antes de activar el proceso en producción:
 
-# Snapshot diario con schema embebido – 01:00
-0  1 * * *   cassandra  /opt/cassandra/backup/daily_snapshot.sh
-
-# Commit logs – cada hora
-0  * * * *   cassandra  /opt/cassandra/backup/commitlog_backup.sh
-
-# Archivo semestral – 1 enero y 1 julio a las 02:00 (solo nodos CPD primario)
-0  2 1 1,7 * cassandra  /opt/cassandra/backup/semiannual_archive.sh
-```
-
-Instalación automática: `scripts/cassandra/backup/install_cron.sh`
-
-> Los scripts de snapshot y archive solo deben ejecutarse en los nodos del CPD primario. En los nodos del CPD secundario solo debe activarse el cron de commit logs.
+| # | Requisito | Detalle |
+|---|-----------|---------|
+| 1 | Punto de montaje compartido | `/mnt/cohesity_pickup/` debe ser accesible desde cada nodo Cassandra (NFS u equivalente) |
+| 2 | Frecuencia de recogida de Cohesity | Cohesity debe recoger los paquetes antes de que la purga local los elimine |
+| 3 | Espacio de staging en nodos Cassandra | Espacio temporal en `/var/lib/cassandra/backup_staging/` para construir el paquete |
+| 4 | Ancho de banda | Capacidad de red suficiente entre nodos y punto de montaje para los volúmenes esperados |
+| 5 | Políticas de retención en Cohesity | 30 días para backups diarios y commit logs; 10 años para archivos semestrales |
+| 6 | Prueba de restauración end-to-end | Validar en entorno de desarrollo que un backup generado es restaurable completamente |
+| 7 | Alertas por fallo de backup | Configurar notificación cuando algún script de backup finalice con error |
 
 ---
 
-## Directorios de pickup para Cohesity
+## Planificación de ejecución (cron)
 
-| Ruta en nodo Cassandra | Contenido | Frecuencia |
-|------------------------|-----------|------------|
-| `/mnt/cohesity_pickup/cassandra/daily/` | `cassandra_backup_<nodo>_<ts>.tar.gz` | Diaria |
-| `/mnt/cohesity_pickup/cassandra/commitlogs/` | `cassandra_commitlog_<nodo>_<ts>.tar.gz` | Horaria |
-| `/mnt/cohesity_pickup/cassandra/schema/` | `schema_<nodo>_<ts>.cql.gz` | Diaria |
-| `/mnt/cohesity_pickup/cassandra/archive/` | `cassandra_archive_<nodo>_<ts>.tar.gz` | Semestral |
-
-Cohesity debe configurarse para recoger estos directorios con las siguientes políticas:
-
-| Directorio | Política Cohesity | Retención |
-|------------|------------------|-----------|
-| `daily/`   | `cassandra-daily` | 30 días |
-| `commitlogs/` | `cassandra-commitlog` | 30 días |
-| `schema/`  | `cassandra-schema` | 30 días |
-| `archive/` | `cassandra-longterm` | 10 años |
+| Tarea | Horario | Entornos |
+|-------|---------|----------|
+| Exportación de esquema CQL | 00:50 diario | Todos |
+| Snapshot diario (datos + esquema) | 01:00 diario | Todos |
+| Backup de commit logs | Cada hora | Todos |
+| Archivo semestral | 1 ene y 1 jul – 02:00 | Solo producción (CPD primario) |
 
 ---
 
 ## Resumen RPO / RTO
 
 | Escenario | RPO | RTO estimado |
-|---|---|---|
-| Error lógico con PITR | ≈ 1 hora | 2-4 horas |
-| Error lógico solo con snapshot | ≈ 24 horas | 1-2 horas |
-| Caída de un CPD (activo-activo) | 0 | 0 (sin restore) |
-| Pérdida total del clúster | ≈ 1 hora | 4-8 horas |
+|-----------|-----|--------------|
+| Error lógico con recuperación a punto en el tiempo | ≈ 1 hora | 2 – 4 horas |
+| Error lógico con restauración de snapshot diario | ≈ 24 horas | 1 – 2 horas |
+| Caída de un CPD (arquitectura activo-activo) | 0 | 0 (sin restauración) |
+| Pérdida total del clúster | ≈ 1 hora | 4 – 8 horas |
