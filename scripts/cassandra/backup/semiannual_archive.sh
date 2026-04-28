@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Creates a long-term archival package: full snapshot + CQL schema.
+# Semiannual long-term archive: full snapshot + CQL schema in one tar.gz.
 # Schedule: January 1 and July 1 at 02:00  →  cron: 0 2 1 1,7 *
-# Retention: 10 years (managed by storage policy on the archive target).
+# Retention: 10 years (enforced by Cohesity storage policy, not this script).
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -10,59 +10,72 @@ source "${SCRIPT_DIR}/lib/common.sh"
 CQLSH_HOST="${CQLSH_HOST:-127.0.0.1}"
 CQLSH_PORT="${CQLSH_PORT:-9042}"
 DATA_DIR="${DATA_DIR:-/var/lib/cassandra/data}"
-ARCHIVE_BASE_DIR="${ARCHIVE_BASE_DIR:-/mnt/longterm_archive/cassandra}"
+DSE_VERSION="${DSE_VERSION:-6.8.36}"
+COHESITY_PICKUP_DIR="${COHESITY_PICKUP_DIR:-/mnt/cohesity_pickup/cassandra/archive}"
+WORK_BASE_DIR="${WORK_BASE_DIR:-/var/lib/cassandra/backup_staging}"
 LOG_FILE="${LOG_DIR}/semiannual_archive.log"
 
 exec >> "${LOG_FILE}" 2>&1
 
+HOSTNAME_SHORT=$(hostname -s)
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
-ARCHIVE_TAG="archive_${TIMESTAMP}"
-WORK_DIR="${ARCHIVE_BASE_DIR}/${ARCHIVE_TAG}"
+SNAPSHOT_TAG="archive_${TIMESTAMP}"
+PACKAGE_NAME="cassandra_archive_${HOSTNAME_SHORT}_${TIMESTAMP}"
+WORK_DIR="${WORK_BASE_DIR}/${PACKAGE_NAME}"
 
-log "INFO" "=== Semiannual archive started: ${ARCHIVE_TAG} ==="
+log "INFO" "=== Semiannual archive started: ${PACKAGE_NAME} ==="
 check_cassandra_alive
+mkdir -p "${WORK_DIR}/schema" "${WORK_DIR}/data" "${COHESITY_PICKUP_DIR}"
 
-mkdir -p "${WORK_DIR}/data" "${WORK_DIR}/schema"
-
-# 1 – Export CQL schema
-SCHEMA_FILE="${WORK_DIR}/schema/schema_${TIMESTAMP}.cql"
-log "INFO" "Exporting full CQL schema..."
+# 1 – Export schema
+log "INFO" "Exporting CQL schema..."
 cqlsh "${CQLSH_HOST}" "${CQLSH_PORT}" \
     --execute "DESCRIBE FULL SCHEMA;" \
-    > "${SCHEMA_FILE}"
-gzip "${SCHEMA_FILE}"
-log "INFO" "Schema saved: ${SCHEMA_FILE}.gz"
+    > "${WORK_DIR}/schema/schema.cql"
 
-# 2 – Take a named snapshot
+# 2 – Flush + snapshot
 log "INFO" "Flushing memtables..."
 nodetool flush
+nodetool clearsnapshot --all 2>/dev/null || true
+log "INFO" "Taking snapshot '${SNAPSHOT_TAG}'..."
+nodetool snapshot --tag "${SNAPSHOT_TAG}"
 
-log "INFO" "Taking archive snapshot '${ARCHIVE_TAG}'..."
-nodetool snapshot --tag "${ARCHIVE_TAG}"
-
-# 3 – Export snapshot data
-log "INFO" "Exporting snapshot data..."
+# 3 – Copy SSTable files
+FILE_COUNT=0
 while IFS= read -r -d '' snap_dir; do
     keyspace=$(echo "${snap_dir}" | awk -F'/' '{print $(NF-3)}')
-    table=$(echo "${snap_dir}"    | awk -F'/' '{print $(NF-2)}')
-    dest="${WORK_DIR}/data/${keyspace}/${table}"
+    table_uuid=$(echo "${snap_dir}" | awk -F'/' '{print $(NF-2)}')
+    dest="${WORK_DIR}/data/${keyspace}/${table_uuid}"
     mkdir -p "${dest}"
     cp -a "${snap_dir}/." "${dest}/"
-done < <(find "${DATA_DIR}" -type d -name "${ARCHIVE_TAG}" -print0)
+    FILE_COUNT=$((FILE_COUNT + $(find "${snap_dir}" -maxdepth 1 -type f | wc -l)))
+done < <(find "${DATA_DIR}" -type d -name "${SNAPSHOT_TAG}" -print0)
 
-# 4 – Clear in-place snapshot
-nodetool clearsnapshot --tag "${ARCHIVE_TAG}"
-log "INFO" "In-place snapshot cleared"
+nodetool clearsnapshot --tag "${SNAPSHOT_TAG}"
+log "INFO" "Snapshot copied (${FILE_COUNT} files), in-place snapshot cleared"
 
-# 5 – Create a single compressed archive for long-term storage
-ARCHIVE_FILE="${ARCHIVE_BASE_DIR}/${ARCHIVE_TAG}.tar.gz"
-log "INFO" "Compressing archive → ${ARCHIVE_FILE}"
-tar -czf "${ARCHIVE_FILE}" -C "${ARCHIVE_BASE_DIR}" "${ARCHIVE_TAG}"
+# 4 – Manifest
+KEYSPACES=$(get_user_keyspaces "${CQLSH_HOST}" "${CQLSH_PORT}" | paste -sd ',' -)
+cat > "${WORK_DIR}/manifest.json" <<EOF
+{
+  "backup_type": "semiannual_archive",
+  "hostname": "${HOSTNAME_SHORT}",
+  "timestamp": "${TIMESTAMP}",
+  "snapshot_tag": "${SNAPSHOT_TAG}",
+  "dse_version": "${DSE_VERSION}",
+  "keyspaces": "${KEYSPACES}",
+  "sstable_files": ${FILE_COUNT},
+  "schema_file": "schema/schema.cql",
+  "retention_years": 10
+}
+EOF
+
+# 5 – Package
+PACKAGE_FILE="${COHESITY_PICKUP_DIR}/${PACKAGE_NAME}.tar.gz"
+log "INFO" "Compressing archive → ${PACKAGE_FILE}"
+tar -czf "${PACKAGE_FILE}" -C "${WORK_BASE_DIR}" "${PACKAGE_NAME}"
+sha256sum "${PACKAGE_FILE}" > "${PACKAGE_FILE}.sha256"
+log "INFO" "Size: $(du -sh "${PACKAGE_FILE}" | cut -f1)  |  SHA-256: $(cat "${PACKAGE_FILE}.sha256")"
+
 rm -rf "${WORK_DIR}"
-
-# 6 – Generate SHA-256 checksum for integrity verification
-sha256sum "${ARCHIVE_FILE}" > "${ARCHIVE_FILE}.sha256"
-log "INFO" "Checksum: $(cat "${ARCHIVE_FILE}.sha256")"
-
-# Retention (10 years) is enforced by the Cohesity/storage policy, not this script.
-log "INFO" "=== Semiannual archive completed: ${ARCHIVE_FILE} ==="
+log "INFO" "=== Semiannual archive completed: ${PACKAGE_FILE} ==="

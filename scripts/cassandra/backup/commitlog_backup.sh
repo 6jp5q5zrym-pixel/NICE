@@ -1,45 +1,66 @@
 #!/usr/bin/env bash
-# Copies active commit logs to a staging directory for Cohesity to ingest.
-# Runs every hour – establishes RPO ≈ 1 hour.
-# Cohesity picks up COMMITLOG_STAGING_DIR as part of its protection job.
+# Packages sealed commit log segments into a tar.gz for Cohesity pickup.
+# Enables point-in-time recovery (PITR) when combined with a daily snapshot.
+# Schedule: every hour  →  cron: 0 * * * *  →  RPO ≈ 1 hour
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/common.sh"
 
 COMMITLOG_DIR="${COMMITLOG_DIR:-/var/lib/cassandra/commitlog}"
-COMMITLOG_STAGING_DIR="${COMMITLOG_STAGING_DIR:-/var/lib/cassandra/commitlog_staging}"
+COHESITY_PICKUP_DIR="${COHESITY_PICKUP_DIR:-/mnt/cohesity_pickup/cassandra/commitlogs}"
+WORK_BASE_DIR="${WORK_BASE_DIR:-/var/lib/cassandra/backup_staging}"
 LOG_FILE="${LOG_DIR}/commitlog_backup.log"
 RETENTION_DAYS="${RETENTION_DAYS:-30}"
 
 exec >> "${LOG_FILE}" 2>&1
 
+HOSTNAME_SHORT=$(hostname -s)
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
-STAGING_SUBDIR="${COMMITLOG_STAGING_DIR}/${TIMESTAMP}"
+PACKAGE_NAME="cassandra_commitlog_${HOSTNAME_SHORT}_${TIMESTAMP}"
+WORK_DIR="${WORK_BASE_DIR}/${PACKAGE_NAME}"
 
 log "INFO" "=== Commit log backup started: ${TIMESTAMP} ==="
 check_cassandra_alive
+mkdir -p "${WORK_DIR}" "${COHESITY_PICKUP_DIR}"
 
-mkdir -p "${STAGING_SUBDIR}"
+# Roll the active commit log segment so the latest writes end up in a sealed
+# (.log) file rather than the in-progress segment that is still being written.
+log "INFO" "Rolling active commit log segment..."
+nodetool flush
 
-# Force Cassandra to roll the current commit log segment so the latest writes
-# are in a sealed (complete) file rather than the in-progress segment.
-log "INFO" "Rolling commit log segments..."
-nodetool drain 2>/dev/null || nodetool flush
-
-# Copy sealed commit log files (.log) to staging – excludes the active segment
-# (which has no extension or is still being written) by relying on the .log suffix.
+# Copy only sealed segments (CommitLog-<version>-<id>.log).
+# The active/in-progress segment has no .log extension or is still open.
 COPIED=0
 while IFS= read -r -d '' clog_file; do
-    cp "${clog_file}" "${STAGING_SUBDIR}/"
+    cp "${clog_file}" "${WORK_DIR}/"
     COPIED=$((COPIED + 1))
 done < <(find "${COMMITLOG_DIR}" -maxdepth 1 -name "CommitLog-*.log" -print0)
 
-log "INFO" "Copied ${COPIED} commit log segment(s) → ${STAGING_SUBDIR}"
+log "INFO" "Staged ${COPIED} commit log segment(s)"
 
-# Purge staging directories older than retention period
-find "${COMMITLOG_STAGING_DIR}" -maxdepth 1 -mindepth 1 -type d \
-    -mtime "+${RETENTION_DAYS}" -exec rm -rf {} +
-log "INFO" "Purged commit log staging dirs older than ${RETENTION_DAYS} days"
+cat > "${WORK_DIR}/manifest.json" <<EOF
+{
+  "backup_type": "commitlog",
+  "hostname": "${HOSTNAME_SHORT}",
+  "timestamp": "${TIMESTAMP}",
+  "segments": ${COPIED}
+}
+EOF
 
-log "INFO" "=== Commit log backup completed: ${TIMESTAMP} ==="
+# Package and place in Cohesity pickup directory
+PACKAGE_FILE="${COHESITY_PICKUP_DIR}/${PACKAGE_NAME}.tar.gz"
+tar -czf "${PACKAGE_FILE}" -C "${WORK_BASE_DIR}" "${PACKAGE_NAME}"
+sha256sum "${PACKAGE_FILE}" > "${PACKAGE_FILE}.sha256"
+log "INFO" "Package → ${PACKAGE_FILE} ($(du -sh "${PACKAGE_FILE}" | cut -f1))"
+
+rm -rf "${WORK_DIR}"
+
+# Purge packages older than retention period
+find "${COHESITY_PICKUP_DIR}" -name "cassandra_commitlog_*.tar.gz" \
+    -mtime "+${RETENTION_DAYS}" -delete
+find "${COHESITY_PICKUP_DIR}" -name "cassandra_commitlog_*.tar.gz.sha256" \
+    -mtime "+${RETENTION_DAYS}" -delete
+log "INFO" "Purged commit log packages older than ${RETENTION_DAYS} days"
+
+log "INFO" "=== Commit log backup completed ==="
