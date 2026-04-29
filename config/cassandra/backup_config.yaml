@@ -5,66 +5,99 @@ cassandra:
   dse_version: "6.8.36"
   cqlsh_host: "127.0.0.1"
   cqlsh_port: 9042
-  data_dir: "/var/lib/cassandra/data"
-  commitlog_dir: "/var/lib/cassandra/commitlog"
-  schema_backup_dir: "/var/lib/cassandra/schema_backups"
-  snapshot_base_dir: "/var/lib/cassandra/snapshots_export"
+  data_dir: "/datos/dse-data"                         # custom path confirmed via cassandra.yaml
+  commitlog_dir: "/datos/dse-data/commitlog"           # verify in cassandra.yaml: commitlog_directory
+  schema_backup_dir: "/logs/cassandra/schema_backups"  # using /logs partition (50 GB available)
+  staging_dir: "/datos/backup_staging"                 # temp staging before packaging (uses /datos 100GB)
 
-# Nodes per environment – update with actual IPs/hostnames
+# Nodes per environment – IPs confirmed from nodetool status
 environments:
   development:
-    datacenter: "dc-dev"
+    datacenter: "CPD1"
     nodes:
-      - "cass-dev-node1"
-      - "cass-dev-node2"
-      - "cass-dev-node3"
+      - "172.28.58.94"   # IBNICECAS01DEV – verify hostname
+    replication_factor: 1
     retention_days: 30
 
   preproduction:
-    datacenter: "dc-preprod"
+    datacenter: "CPD1"
     nodes:
-      - "cass-preprod-node1"
-      - "cass-preprod-node2"
-      - "cass-preprod-node3"
+      - "172.28.58.94"   # IBNICECAS01PRE
+      - "172.28.58.95"   # IBNICECAS02PRE (CPD2)
+    replication_factor: 1   # current PRE setting – RF=1 per DC
     retention_days: 30
 
   production:
-    datacenter: "dc-prod-primary"   # CPD from which backups are taken
+    datacenter: "CPD1"      # CPD from which backups are taken (primary)
     nodes:
-      - "cass-prod-node1"
-      - "cass-prod-node2"
-      - "cass-prod-node3"
-      - "cass-prod-node4"
-      - "cass-prod-node5"
-      - "cass-prod-node6"
+      - "TBD"               # confirm production IPs
+    replication_factor: 3   # recommended for production banking – RF=3 per DC
     retention_days: 30
     archive:
-      frequency: "semiannual"       # January and July
+      frequency: "semiannual"     # January 1 and July 1
       retention_years: 10
-      archive_dir: "/mnt/longterm_archive/cassandra"
+
+# Keyspaces to protect (exclude system/DSE internal keyspaces)
+# _dev suffix = development; production likely uses _pro or _prd suffix – confirm
+keyspaces:
+  application:
+    - "ff_prf_usr_dev"      # user profiles  (production: ff_prf_usr_pro ?)
+    - "ff_prf_anlts_dev"    # analytics      (production: ff_prf_anlts_pro ?)
+    - "ff_prf_sol_dev"      # solutions      (production: ff_prf_sol_pro ?)
+    - "migration_keyspace"
+  exclude:                  # never back up these
+    - "system"
+    - "system_auth"
+    - "system_schema"
+    - "system_distributed"
+    - "system_traces"
+    - "system_views"
+    - "system_virtual_schema"
+    - "system_backups"
+    - "dse_system"
+    - "dse_system_local"
+    - "dse_security"
+    - "dse_leases"
+    - "dse_insights"
+    - "dse_insights_local"
+    - "dse_perf"
+    - "solr_admin"
 
 backup:
   daily_snapshot:
-    schedule: "0 1 * * *"           # 01:00 every day
+    schedule: "0 1 * * *"        # 01:00 every day
     snapshot_name_prefix: "daily"
 
   commitlog:
-    schedule: "0 * * * *"           # every hour
+    schedule: "0 * * * *"        # every hour – RPO ≈ 1 hour
     retention_days: 30
 
   schema:
-    schedule: "0 1 * * *"           # 01:00 every day (runs before snapshot)
+    schedule: "50 0 * * *"       # 00:50 every day (10 min before snapshot)
     retention_days: 30
 
+# Cohesity pickup directories – Cohesity mounts these paths and collects .tar.gz files
 cohesity:
-  # Cohesity picks up snapshot_base_dir and schema_backup_dir after scripts run
-  protection_policy: "cassandra-daily-30d"
-  source_paths:
-    - "/var/lib/cassandra/snapshots_export"
-    - "/var/lib/cassandra/schema_backups"
-    - "/var/lib/cassandra/commitlog"
+  pickup_base: "/mnt/cohesity_pickup/cassandra"
+  pickup_dirs:
+    daily:      "/mnt/cohesity_pickup/cassandra/daily"
+    commitlogs: "/mnt/cohesity_pickup/cassandra/commitlogs"
+    schema:     "/mnt/cohesity_pickup/cassandra/schema"
+    archive:    "/mnt/cohesity_pickup/cassandra/archive"
+  policies:
+    daily:      "cassandra-daily-30d"
+    commitlogs: "cassandra-commitlog-30d"
+    archive:    "cassandra-archive-10y"
   notification_email: "dba-team@bank.internal"
 
+# Volumetry estimates (production) – update once SQL average is confirmed
+volumetry:
+  profiles_count: 225346199
+  avg_blob_bytes_estimated: 1500   # based on SQL sample – run AVG(DATALENGTH(Profile_data)) to confirm
+  total_data_per_node_gb_estimated: 315
+  backup_package_size_gb_estimated: 300  # blobs already zlib-compressed, tar.gz ratio ~1:1
+  cohesity_storage_30d_tb_estimated: 17.5  # 2 nodes × 300 GB × 30 days
+
 logging:
-  log_dir: "/var/log/cassandra/backup"
+  log_dir: "/logs/cassandra/backup"   # using dedicated /logs partition (50 GB)
   log_level: "INFO"

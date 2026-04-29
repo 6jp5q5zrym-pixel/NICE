@@ -9,10 +9,10 @@ source "${SCRIPT_DIR}/lib/common.sh"
 
 CQLSH_HOST="${CQLSH_HOST:-127.0.0.1}"
 CQLSH_PORT="${CQLSH_PORT:-9042}"
-DATA_DIR="${DATA_DIR:-/var/lib/cassandra/data}"
+DATA_DIR="${DATA_DIR:-/datos/dse-data}"
 DSE_VERSION="${DSE_VERSION:-6.8.36}"
 COHESITY_PICKUP_DIR="${COHESITY_PICKUP_DIR:-/mnt/cohesity_pickup/cassandra/archive}"
-WORK_BASE_DIR="${WORK_BASE_DIR:-/var/lib/cassandra/backup_staging}"
+WORK_BASE_DIR="${WORK_BASE_DIR:-/datos/backup_staging}"
 LOG_FILE="${LOG_DIR}/semiannual_archive.log"
 
 exec >> "${LOG_FILE}" 2>&1
