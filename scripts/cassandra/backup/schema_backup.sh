@@ -23,7 +23,7 @@ TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 SCHEMA_FILE="${COHESITY_PICKUP_DIR}/schema_${HOSTNAME_SHORT}_${TIMESTAMP}.cql"
 
 log "INFO" "Exporting CQL schema → ${SCHEMA_FILE}.gz"
-cqlsh "${CQLSH_HOST}" "${CQLSH_PORT}" \
+"${CQLSH}" "${CQLSH_HOST}" "${CQLSH_PORT}" \
     --execute "DESCRIBE FULL SCHEMA;" \
     > "${SCHEMA_FILE}"
 gzip "${SCHEMA_FILE}"

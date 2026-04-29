@@ -29,16 +29,16 @@ mkdir -p "${WORK_DIR}/schema" "${WORK_DIR}/data" "${COHESITY_PICKUP_DIR}"
 
 # 1 – Export schema
 log "INFO" "Exporting CQL schema..."
-cqlsh "${CQLSH_HOST}" "${CQLSH_PORT}" \
+"${CQLSH}" "${CQLSH_HOST}" "${CQLSH_PORT}" \
     --execute "DESCRIBE FULL SCHEMA;" \
     > "${WORK_DIR}/schema/schema.cql"
 
 # 2 – Flush + snapshot
 log "INFO" "Flushing memtables..."
-nodetool flush
-nodetool clearsnapshot --all 2>/dev/null || true
+"${NODETOOL}" flush
+"${NODETOOL}" clearsnapshot --all 2>/dev/null || true
 log "INFO" "Taking snapshot '${SNAPSHOT_TAG}'..."
-nodetool snapshot --tag "${SNAPSHOT_TAG}"
+"${NODETOOL}" snapshot --tag "${SNAPSHOT_TAG}"
 
 # 3 – Copy SSTable files
 FILE_COUNT=0
@@ -51,7 +51,7 @@ while IFS= read -r -d '' snap_dir; do
     FILE_COUNT=$((FILE_COUNT + $(find "${snap_dir}" -maxdepth 1 -type f | wc -l)))
 done < <(find "${DATA_DIR}" -type d -name "${SNAPSHOT_TAG}" -print0)
 
-nodetool clearsnapshot --tag "${SNAPSHOT_TAG}"
+"${NODETOOL}" clearsnapshot --tag "${SNAPSHOT_TAG}"
 log "INFO" "Snapshot copied (${FILE_COUNT} files), in-place snapshot cleared"
 
 # 4 – Manifest

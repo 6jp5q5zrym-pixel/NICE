@@ -86,10 +86,10 @@ if [[ -f "${SCHEMA_FILE}" ]]; then
     log "INFO" "Restoring CQL schema..."
     systemctl start dse 2>/dev/null || systemctl start cassandra
     log "INFO" "Waiting for Cassandra to accept connections..."
-    until cqlsh "${CQLSH_HOST}" "${CQLSH_PORT}" --execute "DESCRIBE KEYSPACES;" &>/dev/null; do
+    until "${CQLSH}" "${CQLSH_HOST}" "${CQLSH_PORT}" --execute "DESCRIBE KEYSPACES;" &>/dev/null; do
         sleep 5
     done
-    cqlsh "${CQLSH_HOST}" "${CQLSH_PORT}" --file "${SCHEMA_FILE}"
+    "${CQLSH}" "${CQLSH_HOST}" "${CQLSH_PORT}" --file "${SCHEMA_FILE}"
     log "INFO" "Schema restored"
     systemctl stop dse 2>/dev/null || systemctl stop cassandra
 else
@@ -156,12 +156,12 @@ log "INFO" "Starting Cassandra service..."
 systemctl start dse 2>/dev/null || systemctl start cassandra
 
 log "INFO" "Waiting for node to become available..."
-until nodetool status &>/dev/null; do sleep 5; done
+until "${NODETOOL}" status &>/dev/null; do sleep 5; done
 log "INFO" "Node is UP – running status:"
-nodetool status | tail -n +4
+"${NODETOOL}" status | tail -n +4
 
 # Trigger repair to sync this node with the rest of the cluster
-log "INFO" "Launching background repair (monitor with: nodetool compactionstats)..."
-nohup nodetool repair --full >> "${LOG_DIR}/repair_after_restore.log" 2>&1 &
+log "INFO" "Launching background repair (monitor with: "${NODETOOL}" compactionstats)..."
+nohup "${NODETOOL}" repair --full >> "${LOG_DIR}/repair_after_restore.log" 2>&1 &
 
 log "INFO" "=== Restore completed successfully ==="

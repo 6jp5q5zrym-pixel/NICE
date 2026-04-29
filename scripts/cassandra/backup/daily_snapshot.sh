@@ -33,7 +33,7 @@ mkdir -p "${WORK_DIR}/schema" "${WORK_DIR}/data" "${COHESITY_PICKUP_DIR}"
 # ── 1. EXPORT CQL SCHEMA ─────────────────────────────────────────────────────
 # Schema must be exported before the snapshot so both are consistent.
 log "INFO" "Exporting CQL schema..."
-cqlsh "${CQLSH_HOST}" "${CQLSH_PORT}" \
+"${CQLSH}" "${CQLSH_HOST}" "${CQLSH_PORT}" \
     --execute "DESCRIBE FULL SCHEMA;" \
     > "${WORK_DIR}/schema/schema.cql"
 log "INFO" "Schema exported ($(wc -l < "${WORK_DIR}/schema/schema.cql") lines)"
@@ -41,12 +41,12 @@ log "INFO" "Schema exported ($(wc -l < "${WORK_DIR}/schema/schema.cql") lines)"
 # ── 2. FLUSH MEMTABLES ───────────────────────────────────────────────────────
 # Ensures all in-memory writes are persisted to SSTables before snapshotting.
 log "INFO" "Flushing memtables..."
-nodetool flush
+"${NODETOOL}" flush
 
 # ── 3. TAKE SNAPSHOT ─────────────────────────────────────────────────────────
-nodetool clearsnapshot --all 2>/dev/null || true
+"${NODETOOL}" clearsnapshot --all 2>/dev/null || true
 log "INFO" "Taking snapshot '${SNAPSHOT_TAG}'..."
-nodetool snapshot --tag "${SNAPSHOT_TAG}"
+"${NODETOOL}" snapshot --tag "${SNAPSHOT_TAG}"
 
 # ── 4. COPY SNAPSHOT SSTABLES ────────────────────────────────────────────────
 # SSTables are the binary data files Cassandra uses on disk.
@@ -66,7 +66,7 @@ done < <(find "${DATA_DIR}" -type d -name "${SNAPSHOT_TAG}" -print0)
 log "INFO" "Copied ${FILE_COUNT} SSTable file(s)"
 
 # ── 5. CLEAR IN-PLACE SNAPSHOT ───────────────────────────────────────────────
-nodetool clearsnapshot --tag "${SNAPSHOT_TAG}"
+"${NODETOOL}" clearsnapshot --tag "${SNAPSHOT_TAG}"
 log "INFO" "In-place Cassandra snapshot cleared"
 
 # ── 6. WRITE MANIFEST ────────────────────────────────────────────────────────

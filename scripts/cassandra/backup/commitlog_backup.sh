@@ -27,7 +27,7 @@ mkdir -p "${WORK_DIR}" "${COHESITY_PICKUP_DIR}"
 # Roll the active commit log segment so the latest writes end up in a sealed
 # (.log) file rather than the in-progress segment that is still being written.
 log "INFO" "Rolling active commit log segment..."
-nodetool flush
+"${NODETOOL}" flush
 
 # Copy only sealed segments (CommitLog-<version>-<id>.log).
 # The active/in-progress segment has no .log extension or is still open.
