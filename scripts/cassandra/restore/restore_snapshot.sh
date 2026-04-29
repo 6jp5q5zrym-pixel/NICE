@@ -8,12 +8,12 @@
 # Examples:
 #   # Restore latest daily snapshot only
 #   restore_snapshot.sh \
-#     --package /mnt/cohesity_pickup/cassandra/daily/cassandra_backup_node1_20260428_010000.tar.gz
+#     --package /datos/backup/cohesity_pickup/daily/cassandra_backup_node1_20260428_010000.tar.gz
 #
 #   # Restore + replay commit logs up to a specific time (logical error / accidental delete)
 #   restore_snapshot.sh \
-#     --package /mnt/cohesity_pickup/cassandra/daily/cassandra_backup_node1_20260428_010000.tar.gz \
-#     --commitlogs /mnt/cohesity_pickup/cassandra/commitlogs \
+#     --package /datos/backup/cohesity_pickup/daily/cassandra_backup_node1_20260428_010000.tar.gz \
+#     --commitlogs /datos/backup/cohesity_pickup/commitlogs \
 #     --target-time "2026-04-28T09:30:00"
 set -euo pipefail
 
