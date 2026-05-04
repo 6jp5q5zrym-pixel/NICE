@@ -1,0 +1,7 @@
+# Enforce LF line endings for all shell scripts (prevents CRLF issues on Linux servers)
+*.sh text eol=lf
+*.cql text eol=lf
+*.yaml text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.properties text eol=lf
