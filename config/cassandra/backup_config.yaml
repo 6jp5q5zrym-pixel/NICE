@@ -1,5 +1,7 @@
 # Cassandra Backup Configuration – DSE 6.8.36
-# Used by all backup scripts in scripts/cassandra/backup/
+# REFERENCE FILE ONLY – the scripts do not read this file.
+# It documents environment parameters. Update it when anything changes.
+# To override a script variable: export VAR=value before running, or edit the script default.
 
 cassandra:
   dse_version: "6.8.36"
@@ -7,19 +9,15 @@ cassandra:
   cqlsh_port: 9042
   data_dir: "/datos/dse-data"
   commitlog_dir: "/datos/dse-data/commitlog"
-  staging_dir: "/datos/backup_staging"      # temp dir to build tar.gz – max ~100 GB needed
+  staging_dir: "/datos/backup_staging"      # temp dir to build tar.gz
 
 # Infrastructure per environment (confirmed)
 environments:
   development:
-    datacenter: "CPD1"
-    nodes_per_dc: 1
+    node: "172.28.58.93"
+    datacenter: "Cassandra"
     total_nodes: 1
-    cpu: 4
-    ram_gb: 16
-    data_disk_gb: 100
-    log_disk_gb: 50
-    replication_factor_per_dc: 1
+    replication_factor: 1
     retention_days: 30
     keyspaces:
       - "ff_prf_usr_dev"
@@ -27,36 +25,35 @@ environments:
       - "ff_prf_sol_dev"
 
   preproduction:
-    datacenter: "CPD1"
-    nodes_per_dc: 1
-    total_nodes: 2          # 1 per DC (confirmed: 172.28.58.94 CPD1, 172.28.58.95 CPD2)
-    cpu: 4
-    ram_gb: 16
-    data_disk_gb: 100
-    log_disk_gb: 50
+    datacenters:
+      - name: "CPD1"
+        node: "172.28.58.94"
+      - name: "CPD2"
+        node: "172.28.58.95"
+    total_nodes: 2
     replication_factor_per_dc: 1
     retention_days: 30
     keyspaces:
-      - "ff_prf_usr_dev"
-      - "ff_prf_anlts_dev"
-      - "ff_prf_sol_dev"
+      - "ff_prf_usr_pre"
+      - "ff_prf_anlts_pre"
+      - "ff_prf_sol_pre"
 
   production:
-    datacenter: "CPD1"      # CPD from which backups are taken
-    nodes_per_dc: 2
-    total_nodes: 4          # 2 per DC (CPD1 + CPD2)
-    cpu: 16
-    ram_gb: 32
-    data_disk_gb: 650
-    log_disk_gb: 300
-    replication_factor_per_dc: 2    # RF=2: max for 2 nodes/DC, 1 node can fail per DC
+    datacenters:
+      - name: "CPD1"
+        nodes: 2
+      - name: "CPD2"
+        nodes: 2
+    total_nodes: 4
+    replication_factor_per_dc: 2
     retention_days: 30
     keyspaces:
       - "ff_prf_usr_pro"
       - "ff_prf_anlts_pro"
       - "ff_prf_sol_pro"
     archive:
-      frequency: "semiannual"     # January 1 and July 1
+      frequency: "semiannual"
+      first_run: "TBD – first day after go-live"
       retention_years: 10
 
 # Keyspaces to exclude from all backups (DSE/Cassandra internal)
