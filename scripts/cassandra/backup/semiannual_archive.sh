@@ -51,7 +51,7 @@ while IFS= read -r -d '' snap_dir; do
     FILE_COUNT=$((FILE_COUNT + $(find "${snap_dir}" -maxdepth 1 -type f | wc -l)))
 done < <(find "${DATA_DIR}" -type d -name "${SNAPSHOT_TAG}" -print0)
 
-"${NODETOOL}" clearsnapshot --tag "${SNAPSHOT_TAG}"
+"${NODETOOL}" clearsnapshot "${SNAPSHOT_TAG}"
 log "INFO" "Snapshot copied (${FILE_COUNT} files), in-place snapshot cleared"
 
 # 4 – Manifest

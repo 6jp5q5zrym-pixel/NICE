@@ -66,7 +66,7 @@ done < <(find "${DATA_DIR}" -type d -name "${SNAPSHOT_TAG}" -print0)
 log "INFO" "Copied ${FILE_COUNT} SSTable file(s)"
 
 # ── 5. CLEAR IN-PLACE SNAPSHOT ───────────────────────────────────────────────
-"${NODETOOL}" clearsnapshot --tag "${SNAPSHOT_TAG}"
+"${NODETOOL}" clearsnapshot "${SNAPSHOT_TAG}"
 log "INFO" "In-place Cassandra snapshot cleared"
 
 # ── 6. WRITE MANIFEST ────────────────────────────────────────────────────────
