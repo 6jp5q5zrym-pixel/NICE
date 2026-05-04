@@ -97,10 +97,10 @@ backup:
 # Cohesity pickup directories
 cohesity:
   pickup_dirs:
-    daily:      "/mnt/cohesity_pickup/cassandra/daily"
-    commitlogs: "/mnt/cohesity_pickup/cassandra/commitlogs"
-    schema:     "/mnt/cohesity_pickup/cassandra/schema"
-    archive:    "/mnt/cohesity_pickup/cassandra/archive"
+    daily:      "/datos/backup/cohesity_pickup/daily"
+    commitlogs: "/datos/backup/cohesity_pickup/commitlogs"
+    schema:     "/datos/backup/cohesity_pickup/schema"
+    archive:    "/datos/backup/cohesity_pickup/archive"
   policies:
     daily:      "cassandra-daily-30d"
     commitlogs: "cassandra-commitlog-30d"
