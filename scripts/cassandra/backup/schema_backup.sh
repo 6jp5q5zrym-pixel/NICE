@@ -9,7 +9,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/common.sh"
 
-CQLSH_HOST="${CQLSH_HOST:-127.0.0.1}"
+CQLSH_HOST="${CQLSH_HOST:-$(hostname -I | awk '{print $1}')}"
 CQLSH_PORT="${CQLSH_PORT:-9042}"
 COHESITY_PICKUP_DIR="${COHESITY_PICKUP_DIR:-/datos/backup/cohesity_pickup/schema}"
 LOG_FILE="${LOG_DIR}/schema_backup.log"

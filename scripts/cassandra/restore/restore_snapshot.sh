@@ -20,7 +20,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../backup/lib/common.sh"
 
-CQLSH_HOST="${CQLSH_HOST:-127.0.0.1}"
+CQLSH_HOST="${CQLSH_HOST:-$(hostname -I | awk '{print $1}')}"
 CQLSH_PORT="${CQLSH_PORT:-9042}"
 DATA_DIR="${DATA_DIR:-/datos/dse-data}"
 CASSANDRA_YAML="${CASSANDRA_YAML:-/etc/dse/cassandra/cassandra.yaml}"
