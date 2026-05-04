@@ -36,7 +36,7 @@ log "INFO" "Exporting CQL schema..."
 # 2 – Flush + snapshot
 log "INFO" "Flushing memtables..."
 "${NODETOOL}" flush
-"${NODETOOL}" clearsnapshot --all 2>/dev/null || true
+find "${DATA_DIR}" -type d -name "archive_*" -exec rm -rf {} + 2>/dev/null || true
 log "INFO" "Taking snapshot '${SNAPSHOT_TAG}'..."
 "${NODETOOL}" snapshot --tag "${SNAPSHOT_TAG}"
 
@@ -51,7 +51,7 @@ while IFS= read -r -d '' snap_dir; do
     FILE_COUNT=$((FILE_COUNT + $(find "${snap_dir}" -maxdepth 1 -type f | wc -l)))
 done < <(find "${DATA_DIR}" -type d -name "${SNAPSHOT_TAG}" -print0)
 
-"${NODETOOL}" clearsnapshot "${SNAPSHOT_TAG}"
+find "${DATA_DIR}" -type d -name "${SNAPSHOT_TAG}" -exec rm -rf {} + 2>/dev/null || true
 log "INFO" "Snapshot copied (${FILE_COUNT} files), in-place snapshot cleared"
 
 # 4 – Manifest

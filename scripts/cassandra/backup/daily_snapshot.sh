@@ -44,7 +44,8 @@ log "INFO" "Flushing memtables..."
 "${NODETOOL}" flush
 
 # ── 3. TAKE SNAPSHOT ─────────────────────────────────────────────────────────
-"${NODETOOL}" clearsnapshot --all 2>/dev/null || true
+# Remove any leftover snapshots from previous runs before creating a new one.
+find "${DATA_DIR}" -type d -name "daily_*" -exec rm -rf {} + 2>/dev/null || true
 log "INFO" "Taking snapshot '${SNAPSHOT_TAG}'..."
 "${NODETOOL}" snapshot --tag "${SNAPSHOT_TAG}"
 
@@ -66,7 +67,7 @@ done < <(find "${DATA_DIR}" -type d -name "${SNAPSHOT_TAG}" -print0)
 log "INFO" "Copied ${FILE_COUNT} SSTable file(s)"
 
 # ── 5. CLEAR IN-PLACE SNAPSHOT ───────────────────────────────────────────────
-"${NODETOOL}" clearsnapshot "${SNAPSHOT_TAG}"
+find "${DATA_DIR}" -type d -name "${SNAPSHOT_TAG}" -exec rm -rf {} + 2>/dev/null || true
 log "INFO" "In-place Cassandra snapshot cleared"
 
 # ── 6. WRITE MANIFEST ────────────────────────────────────────────────────────
