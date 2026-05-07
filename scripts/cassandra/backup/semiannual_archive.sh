@@ -27,11 +27,14 @@ log "INFO" "=== Semiannual archive started: ${PACKAGE_NAME} ==="
 check_cassandra_alive
 mkdir -p "${WORK_DIR}/schema" "${WORK_DIR}/data" "${COHESITY_PICKUP_DIR}"
 
-# 1 – Export schema
-log "INFO" "Exporting CQL schema..."
-"${CQLSH}" "${CQLSH_HOST}" "${CQLSH_PORT}" \
-    --execute "DESCRIBE FULL SCHEMA;" \
-    > "${WORK_DIR}/schema/schema.cql"
+# 1 – Export schema (user keyspaces only)
+log "INFO" "Exporting CQL schema (user keyspaces only)..."
+: > "${WORK_DIR}/schema/schema.cql"
+while IFS= read -r ks; do
+    "${CQLSH}" "${CQLSH_HOST}" "${CQLSH_PORT}" \
+        --execute "DESCRIBE KEYSPACE ${ks};" \
+        >> "${WORK_DIR}/schema/schema.cql"
+done < <(get_user_keyspaces "${CQLSH_HOST}" "${CQLSH_PORT}")
 
 # 2 – Flush + snapshot
 log "INFO" "Flushing memtables..."

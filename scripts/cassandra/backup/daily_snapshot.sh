@@ -31,11 +31,14 @@ check_cassandra_alive
 mkdir -p "${WORK_DIR}/schema" "${WORK_DIR}/data" "${COHESITY_PICKUP_DIR}"
 
 # ── 1. EXPORT CQL SCHEMA ─────────────────────────────────────────────────────
-# Schema must be exported before the snapshot so both are consistent.
-log "INFO" "Exporting CQL schema..."
-"${CQLSH}" "${CQLSH_HOST}" "${CQLSH_PORT}" \
-    --execute "DESCRIBE FULL SCHEMA;" \
-    > "${WORK_DIR}/schema/schema.cql"
+# Export only user keyspaces to avoid noise from system keyspaces on restore.
+log "INFO" "Exporting CQL schema (user keyspaces only)..."
+: > "${WORK_DIR}/schema/schema.cql"
+while IFS= read -r ks; do
+    "${CQLSH}" "${CQLSH_HOST}" "${CQLSH_PORT}" \
+        --execute "DESCRIBE KEYSPACE ${ks};" \
+        >> "${WORK_DIR}/schema/schema.cql"
+done < <(get_user_keyspaces "${CQLSH_HOST}" "${CQLSH_PORT}")
 log "INFO" "Schema exported ($(wc -l < "${WORK_DIR}/schema/schema.cql") lines)"
 
 # ── 2. FLUSH MEMTABLES ───────────────────────────────────────────────────────

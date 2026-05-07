@@ -22,10 +22,13 @@ HOSTNAME_SHORT=$(hostname -s)
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 SCHEMA_FILE="${COHESITY_PICKUP_DIR}/schema_${HOSTNAME_SHORT}_${TIMESTAMP}.cql"
 
-log "INFO" "Exporting CQL schema → ${SCHEMA_FILE}.gz"
-"${CQLSH}" "${CQLSH_HOST}" "${CQLSH_PORT}" \
-    --execute "DESCRIBE FULL SCHEMA;" \
-    > "${SCHEMA_FILE}"
+log "INFO" "Exporting CQL schema (user keyspaces only) → ${SCHEMA_FILE}.gz"
+: > "${SCHEMA_FILE}"
+while IFS= read -r ks; do
+    "${CQLSH}" "${CQLSH_HOST}" "${CQLSH_PORT}" \
+        --execute "DESCRIBE KEYSPACE ${ks};" \
+        >> "${SCHEMA_FILE}"
+done < <(get_user_keyspaces "${CQLSH_HOST}" "${CQLSH_PORT}")
 gzip "${SCHEMA_FILE}"
 
 ln -sfn "${SCHEMA_FILE}.gz" "${COHESITY_PICKUP_DIR}/schema_latest.cql.gz"
