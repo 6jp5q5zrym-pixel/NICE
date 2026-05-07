@@ -27,6 +27,10 @@ CASSANDRA_YAML="${CASSANDRA_YAML:-/etc/dse/cassandra/cassandra.yaml}"
 EXTRACT_DIR="${EXTRACT_DIR:-/datos/restore_staging}"
 LOG_FILE="${LOG_DIR}/restore.log"
 
+# When run as root (sudo), cqlsh looks for cqlshrc in root's HOME.
+# Set HOME to the cassandra OS user's home so cqlsh finds its credentials.
+export HOME="$(getent passwd cassandra | cut -d: -f6)"
+
 PACKAGE_FILE=""
 COMMITLOGS_SRC=""
 TARGET_TIME=""
