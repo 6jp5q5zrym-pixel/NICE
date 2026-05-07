@@ -93,7 +93,7 @@ if [[ -f "${SCHEMA_FILE}" ]]; then
     until "${CQLSH}" "${CQLSH_HOST}" "${CQLSH_PORT}" --execute "DESCRIBE KEYSPACES;" &>/dev/null; do
         sleep 5
     done
-    "${CQLSH}" "${CQLSH_HOST}" "${CQLSH_PORT}" --file "${SCHEMA_FILE}"
+    "${CQLSH}" "${CQLSH_HOST}" "${CQLSH_PORT}" --file "${SCHEMA_FILE}" 2>&1 || true
     log "INFO" "Schema restored"
     systemctl stop dse 2>/dev/null || systemctl stop cassandra
 else
