@@ -1,0 +1,77 @@
+# cassandra.yaml – CAMBIOS RESPECTO AL DEFAULT para nodos de PRODUCCIÓN (DSE 6.8.36)
+# INSTRUCCIONES:
+#   - Aplicar en /etc/dse/cassandra/cassandra.yaml (instalación por paquete)
+#     o en <install>/resources/cassandra/conf/cassandra.yaml (tarball).
+#   - Sustituir los placeholders <CPD1_NODE1_IP>, <CPD2_NODE1_IP>, etc. con IPs reales.
+#   - Los valores comentados como "← NODE-SPECIFIC" cambian en cada nodo.
+#   - El resto es idéntico en los 4 nodos.
+# IMPORTANTE: Solo se listan los parámetros que hay que tocar. Todo lo demás se deja en default.
+
+# ─── 1. TOPOLOGÍA Y DESCUBRIMIENTO ───────────────────────────────────────────
+# DseSimpleSnitch (default de DSE) NO soporta multi-DC geográfico → obligatorio cambiar.
+endpoint_snitch: GossipingPropertyFileSnitch
+
+# Seeds: al menos 1 por DC. NO poner todos los nodos como seed.
+# Con 2 nodos por DC, usar el primer nodo de cada DC como seed.
+seed_provider:
+  - class_name: org.apache.cassandra.locator.SimpleSeedProvider
+    parameters:
+      - seeds: "<CPD1_NODE1_IP>,<CPD2_NODE1_IP>"   # reemplazar con IPs reales
+
+# IP de escucha de este nodo – DIFERENTE en cada nodo (inter-nodo gossip + streaming)
+listen_address: "<ESTA_IP>"          # ← NODE-SPECIFIC
+
+# IP que el nodo anuncia a clientes CQL (drivers)
+rpc_address: "<ESTA_IP>"             # ← NODE-SPECIFIC
+# Si la IP pública difiere de listen_address (NAT), usar broadcast_rpc_address en su lugar.
+
+# ─── 2. VNODES ────────────────────────────────────────────────────────────────
+# Default DSE 6.8: num_tokens viene comentado (efectivo = 1 token → distribución pésima).
+# DataStax recomienda 8 para producción: distribución ~±10%, repair/bootstrap manejables.
+# IMPORTANTE: todos los nodos deben tener el mismo valor ANTES de arrancar el clúster.
+num_tokens: 8
+
+# ─── 3. COMPACTACIÓN ─────────────────────────────────────────────────────────
+# Default: 16 MB/s (demasiado bajo para SSDs de producción).
+# Con SSDs y carga de escritura moderada: 64 MB/s es un punto de partida seguro.
+# Monitorizar con: nodetool compactionstats; subir si hay acumulación persistente.
+compaction_throughput_mb_per_sec: 64
+
+# ─── 4. COMPRESIÓN INTER-NODO ────────────────────────────────────────────────
+# Comprimir solo tráfico inter-DC (ahorra ancho de banda WAN sin coste intra-DC).
+# 'dc' = comprimir solo entre datacenters. 'all' = también intra-DC. 'none' = nada.
+internode_compression: dc
+
+# ─── 5. HINTED HANDOFF ───────────────────────────────────────────────────────
+# Defaults de DSE 6.8 ya son correctos; se listan solo para visibilidad.
+# hinted_handoff_enabled: true         # (default: true – no tocar)
+# max_hint_window_in_ms: 10800000      # 3 horas (default) – bien dentro de gc_grace (10 días)
+# hinted_handoff_throttle_in_kb: 1024  # (default: 1024 KB/s – no tocar)
+
+# ─── 6. TIMEOUTS ─────────────────────────────────────────────────────────────
+# Defaults de DSE 6.8 son correctos para producción OLTP.
+# Solo ajustar si hay evidencia de queries lentas legítimas (no para enmascarar problemas).
+# read_request_timeout_in_ms:  5000    # (default)
+# write_request_timeout_in_ms: 2000    # (default)
+# range_request_timeout_in_ms: 10000   # (default)
+# request_timeout_in_ms:       10000   # (default)
+
+# ─── 7. CONCURRENCIA ─────────────────────────────────────────────────────────
+# Fórmulas base (ajustar tras medir con tpstats):
+#   concurrent_reads:  16 × nº_discos_datos  (SSD: 32–64)
+#   concurrent_writes:  8 × nº_cores_CPU     (típico: 32–64)
+# Empezar en 32 y monitorizar: nodetool tpstats | grep -A4 READ | grep -A4 WRITE
+# Si "Blocked" > 0 de forma sostenida → subir valor.
+# concurrent_reads:  32   # (default – ajustar según hardware)
+# concurrent_writes: 32   # (default – ajustar según hardware)
+
+# ─── 8. MEMTABLE ─────────────────────────────────────────────────────────────
+# DSE 6.8 ya viene con offheap_objects por default (diferencia clave vs OSS Cassandra).
+# Reduce presión de GC en cargas de escritura alta. NO cambiar.
+# memtable_allocation_type: offheap_objects   # (default en DSE 6.8 – no tocar)
+
+# ─── 9. COMMITLOG ────────────────────────────────────────────────────────────
+# commitlog_sync: periodic               # (default: periodic – no tocar)
+# commitlog_sync_period_in_ms: 10000     # 10s (default)
+# commitlog_segment_size_in_mb: 32       # (default)
+# commitlog_directory ya configurado en installación – verificar que apunta a disco dedicado
