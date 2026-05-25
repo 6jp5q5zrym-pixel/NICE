@@ -64,7 +64,7 @@ while IFS= read -r -d '' snap_dir; do
     table_uuid=$(echo "${snap_dir}" | awk -F'/' '{print $(NF-2)}')
     dest="${WORK_DIR}/data/${keyspace}/${table_uuid}"
     mkdir -p "${dest}"
-    cp -a "${snap_dir}/." "${dest}/"
+    cp -al "${snap_dir}/." "${dest}/"
     FILE_COUNT=$((FILE_COUNT + $(find "${snap_dir}" -maxdepth 1 -type f | wc -l)))
 done < <(find "${DATA_DIR}" -type d -name "${SNAPSHOT_TAG}" -print0)
 log "INFO" "Copied ${FILE_COUNT} SSTable file(s)"
