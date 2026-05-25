@@ -47,10 +47,12 @@ log "INFO" "Flushing memtables..."
 "${NODETOOL}" flush
 
 # ── 3. TAKE SNAPSHOT ─────────────────────────────────────────────────────────
-# Remove any leftover snapshots from previous runs before creating a new one.
+# Snapshot only user keyspaces to exclude system/DSE internal keyspaces.
+# This reduces backup size and avoids system keyspace conflicts on restore.
 find "${DATA_DIR}" -type d -name "daily_*" -exec rm -rf {} + 2>/dev/null || true
-log "INFO" "Taking snapshot '${SNAPSHOT_TAG}'..."
-"${NODETOOL}" snapshot --tag "${SNAPSHOT_TAG}"
+log "INFO" "Taking snapshot '${SNAPSHOT_TAG}' (user keyspaces only)..."
+USER_KEYSPACES=$(get_user_keyspaces "${CQLSH_HOST}" "${CQLSH_PORT}" | tr '\n' ' ')
+"${NODETOOL}" snapshot --tag "${SNAPSHOT_TAG}" ${USER_KEYSPACES}
 
 # ── 4. COPY SNAPSHOT SSTABLES ────────────────────────────────────────────────
 # SSTables are the binary data files Cassandra uses on disk.
@@ -60,8 +62,6 @@ FILE_COUNT=0
 while IFS= read -r -d '' snap_dir; do
     keyspace=$(echo "${snap_dir}" | awk -F'/' '{print $(NF-3)}')
     table_uuid=$(echo "${snap_dir}" | awk -F'/' '{print $(NF-2)}')
-    # Strip the UUID suffix from the table directory name for readability
-    table="${table_uuid%-*}"
     dest="${WORK_DIR}/data/${keyspace}/${table_uuid}"
     mkdir -p "${dest}"
     cp -a "${snap_dir}/." "${dest}/"

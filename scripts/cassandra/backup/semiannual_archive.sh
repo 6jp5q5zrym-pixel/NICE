@@ -40,8 +40,9 @@ done < <(get_user_keyspaces "${CQLSH_HOST}" "${CQLSH_PORT}")
 log "INFO" "Flushing memtables..."
 "${NODETOOL}" flush
 find "${DATA_DIR}" -type d -name "archive_*" -exec rm -rf {} + 2>/dev/null || true
-log "INFO" "Taking snapshot '${SNAPSHOT_TAG}'..."
-"${NODETOOL}" snapshot --tag "${SNAPSHOT_TAG}"
+log "INFO" "Taking snapshot '${SNAPSHOT_TAG}' (user keyspaces only)..."
+USER_KEYSPACES=$(get_user_keyspaces "${CQLSH_HOST}" "${CQLSH_PORT}" | tr '\n' ' ')
+"${NODETOOL}" snapshot --tag "${SNAPSHOT_TAG}" ${USER_KEYSPACES}
 
 # 3 – Copy SSTable files
 FILE_COUNT=0
