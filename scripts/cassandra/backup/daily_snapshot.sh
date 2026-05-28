@@ -16,7 +16,7 @@ DSE_VERSION="${DSE_VERSION:-6.8.36}"
 COHESITY_PICKUP_DIR="${COHESITY_PICKUP_DIR:-/datos/backup/cohesity_pickup/daily}"
 WORK_BASE_DIR="${WORK_BASE_DIR:-/datos/backup_staging}"
 LOG_FILE="${LOG_DIR}/daily_snapshot.log"
-RETENTION_DAYS="${RETENTION_DAYS:-30}"
+RETENTION_MINUTES="${RETENTION_MINUTES:-1440}"
 
 exec >> "${LOG_FILE}" 2>&1
 
@@ -99,9 +99,9 @@ log "INFO" "SHA-256: $(cat "${PACKAGE_FILE}.sha256")"
 # ── 8. CLEANUP & RETENTION ───────────────────────────────────────────────────
 rm -rf "${WORK_DIR}"
 find "${COHESITY_PICKUP_DIR}" -name "cassandra_backup_*.tar.gz" \
-    -mtime "+${RETENTION_DAYS}" -delete
+    -mmin "+${RETENTION_MINUTES}" -delete
 find "${COHESITY_PICKUP_DIR}" -name "cassandra_backup_*.tar.gz.sha256" \
-    -mtime "+${RETENTION_DAYS}" -delete
-log "INFO" "Purged packages older than ${RETENTION_DAYS} days"
+    -mmin "+${RETENTION_MINUTES}" -delete
+log "INFO" "Purged packages older than ${RETENTION_MINUTES} minutes ($(( RETENTION_MINUTES / 60 ))h)"
 
 log "INFO" "=== Daily backup completed: ${PACKAGE_FILE} ==="

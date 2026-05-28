@@ -11,7 +11,7 @@ COMMITLOG_DIR="${COMMITLOG_DIR:-/datos/dse-data/commitlog}"
 COHESITY_PICKUP_DIR="${COHESITY_PICKUP_DIR:-/datos/backup/cohesity_pickup/commitlogs}"
 WORK_BASE_DIR="${WORK_BASE_DIR:-/datos/backup_staging}"
 LOG_FILE="${LOG_DIR}/commitlog_backup.log"
-RETENTION_DAYS="${RETENTION_DAYS:-30}"
+RETENTION_MINUTES="${RETENTION_MINUTES:-2880}"
 
 exec >> "${LOG_FILE}" 2>&1
 
@@ -58,9 +58,9 @@ rm -rf "${WORK_DIR}"
 
 # Purge packages older than retention period
 find "${COHESITY_PICKUP_DIR}" -name "cassandra_commitlog_*.tar.gz" \
-    -mtime "+${RETENTION_DAYS}" -delete
+    -mmin "+${RETENTION_MINUTES}" -delete
 find "${COHESITY_PICKUP_DIR}" -name "cassandra_commitlog_*.tar.gz.sha256" \
-    -mtime "+${RETENTION_DAYS}" -delete
-log "INFO" "Purged commit log packages older than ${RETENTION_DAYS} days"
+    -mmin "+${RETENTION_MINUTES}" -delete
+log "INFO" "Purged commit log packages older than ${RETENTION_MINUTES} minutes ($(( RETENTION_MINUTES / 60 ))h)"
 
 log "INFO" "=== Commit log backup completed ==="

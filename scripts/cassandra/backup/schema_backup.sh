@@ -13,7 +13,7 @@ CQLSH_HOST="${CQLSH_HOST:-$(hostname -I | awk '{print $1}')}"
 CQLSH_PORT="${CQLSH_PORT:-9042}"
 COHESITY_PICKUP_DIR="${COHESITY_PICKUP_DIR:-/datos/backup/cohesity_pickup/schema}"
 LOG_FILE="${LOG_DIR}/schema_backup.log"
-RETENTION_DAYS="${RETENTION_DAYS:-30}"
+RETENTION_MINUTES="${RETENTION_MINUTES:-2880}"
 
 exec >> "${LOG_FILE}" 2>&1
 mkdir -p "${COHESITY_PICKUP_DIR}"
@@ -35,5 +35,5 @@ ln -sfn "${SCHEMA_FILE}.gz" "${COHESITY_PICKUP_DIR}/schema_latest.cql.gz"
 log "INFO" "Schema exported (symlink updated: schema_latest.cql.gz)"
 
 find "${COHESITY_PICKUP_DIR}" -name "schema_*.cql.gz" \
-    -mtime "+${RETENTION_DAYS}" -delete
-log "INFO" "Purged schema files older than ${RETENTION_DAYS} days"
+    -mmin "+${RETENTION_MINUTES}" -delete
+log "INFO" "Purged schema files older than ${RETENTION_MINUTES} minutes ($(( RETENTION_MINUTES / 60 ))h)"
