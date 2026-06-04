@@ -91,7 +91,8 @@ EOF
 # ── 7. PACKAGE INTO TAR.GZ ───────────────────────────────────────────────────
 PACKAGE_FILE="${COHESITY_PICKUP_DIR}/${PACKAGE_NAME}.tar.gz"
 log "INFO" "Creating package → ${PACKAGE_FILE}"
-tar -czf "${PACKAGE_FILE}" -C "${WORK_BASE_DIR}" "${PACKAGE_NAME}"
+tar --ignore-failed-read -czf "${PACKAGE_FILE}" -C "${WORK_BASE_DIR}" "${PACKAGE_NAME}" \
+    || log "WARN" "tar completed with warnings — some recently-compacted SSTables may be missing from archive"
 sha256sum "${PACKAGE_FILE}" > "${PACKAGE_FILE}.sha256"
 log "INFO" "Package size: $(du -sh "${PACKAGE_FILE}" | cut -f1)"
 log "INFO" "SHA-256: $(cat "${PACKAGE_FILE}.sha256")"

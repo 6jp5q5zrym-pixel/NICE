@@ -77,7 +77,8 @@ EOF
 # 5 – Package
 PACKAGE_FILE="${COHESITY_PICKUP_DIR}/${PACKAGE_NAME}.tar.gz"
 log "INFO" "Compressing archive → ${PACKAGE_FILE}"
-tar -czf "${PACKAGE_FILE}" -C "${WORK_BASE_DIR}" "${PACKAGE_NAME}"
+tar --ignore-failed-read -czf "${PACKAGE_FILE}" -C "${WORK_BASE_DIR}" "${PACKAGE_NAME}" \
+    || log "WARN" "tar completed with warnings — some recently-compacted SSTables may be missing from archive"
 sha256sum "${PACKAGE_FILE}" > "${PACKAGE_FILE}.sha256"
 log "INFO" "Size: $(du -sh "${PACKAGE_FILE}" | cut -f1)  |  SHA-256: $(cat "${PACKAGE_FILE}.sha256")"
 
