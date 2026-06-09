@@ -49,9 +49,12 @@ cat > "${WORK_DIR}/manifest.json" <<EOF
 EOF
 
 # Package and place in Cohesity pickup directory
+# Write to .tmp first — Cohesity never snapshots a partial file.
 PACKAGE_FILE="${COHESITY_PICKUP_DIR}/${PACKAGE_NAME}.tar.gz"
-tar -czf "${PACKAGE_FILE}" -C "${WORK_BASE_DIR}" "${PACKAGE_NAME}"
-sha256sum "${PACKAGE_FILE}" > "${PACKAGE_FILE}.sha256"
+PACKAGE_TMP="${PACKAGE_FILE}.tmp"
+tar -czf "${PACKAGE_TMP}" -C "${WORK_BASE_DIR}" "${PACKAGE_NAME}"
+sha256sum "${PACKAGE_TMP}" | sed "s|${PACKAGE_TMP}|${PACKAGE_FILE}|" > "${PACKAGE_FILE}.sha256"
+mv "${PACKAGE_TMP}" "${PACKAGE_FILE}"
 log "INFO" "Package → ${PACKAGE_FILE} ($(du -sh "${PACKAGE_FILE}" | cut -f1))"
 
 rm -rf "${WORK_DIR}"
@@ -61,6 +64,7 @@ find "${COHESITY_PICKUP_DIR}" -name "cassandra_commitlog_*.tar.gz" \
     -mmin "+${RETENTION_MINUTES}" -delete
 find "${COHESITY_PICKUP_DIR}" -name "cassandra_commitlog_*.tar.gz.sha256" \
     -mmin "+${RETENTION_MINUTES}" -delete
+find "${COHESITY_PICKUP_DIR}" -name "cassandra_commitlog_*.tar.gz.tmp" -delete 2>/dev/null || true
 log "INFO" "Purged commit log packages older than ${RETENTION_MINUTES} minutes ($(( RETENTION_MINUTES / 60 ))h)"
 
 log "INFO" "=== Commit log backup completed ==="

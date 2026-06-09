@@ -75,11 +75,14 @@ cat > "${WORK_DIR}/manifest.json" <<EOF
 EOF
 
 # 5 – Package
+# Write to .tmp first — Cohesity never snapshots a partial file.
 PACKAGE_FILE="${COHESITY_PICKUP_DIR}/${PACKAGE_NAME}.tar.gz"
+PACKAGE_TMP="${PACKAGE_FILE}.tmp"
 log "INFO" "Compressing archive → ${PACKAGE_FILE}"
-tar --ignore-failed-read -czf "${PACKAGE_FILE}" -C "${WORK_BASE_DIR}" "${PACKAGE_NAME}" \
+tar --ignore-failed-read -czf "${PACKAGE_TMP}" -C "${WORK_BASE_DIR}" "${PACKAGE_NAME}" \
     || log "WARN" "tar completed with warnings — some recently-compacted SSTables may be missing from archive"
-sha256sum "${PACKAGE_FILE}" > "${PACKAGE_FILE}.sha256"
+sha256sum "${PACKAGE_TMP}" | sed "s|${PACKAGE_TMP}|${PACKAGE_FILE}|" > "${PACKAGE_FILE}.sha256"
+mv "${PACKAGE_TMP}" "${PACKAGE_FILE}"
 log "INFO" "Size: $(du -sh "${PACKAGE_FILE}" | cut -f1)  |  SHA-256: $(cat "${PACKAGE_FILE}.sha256")"
 
 rm -rf "${WORK_DIR}"

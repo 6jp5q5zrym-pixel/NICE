@@ -16,7 +16,7 @@ DSE_VERSION="${DSE_VERSION:-6.8.36}"
 COHESITY_PICKUP_DIR="${COHESITY_PICKUP_DIR:-/mnt/cohesity/daily}"
 WORK_BASE_DIR="${WORK_BASE_DIR:-/datos/backup_staging}"
 LOG_FILE="${LOG_DIR}/daily_snapshot.log"
-RETENTION_MINUTES="${RETENTION_MINUTES:-2880}"
+RETENTION_MINUTES="${RETENTION_MINUTES:-1440}"
 
 exec >> "${LOG_FILE}" 2>&1
 
@@ -89,16 +89,21 @@ cat > "${WORK_DIR}/manifest.json" <<EOF
 EOF
 
 # ── 7. PACKAGE INTO TAR.GZ ───────────────────────────────────────────────────
+# Write to .tmp first — Cohesity never snapshots a partial file.
+# Only rename to final name once tar + sha256 are both complete.
 PACKAGE_FILE="${COHESITY_PICKUP_DIR}/${PACKAGE_NAME}.tar.gz"
+PACKAGE_TMP="${PACKAGE_FILE}.tmp"
 log "INFO" "Creating package → ${PACKAGE_FILE}"
-tar --ignore-failed-read -czf "${PACKAGE_FILE}" -C "${WORK_BASE_DIR}" "${PACKAGE_NAME}" \
+tar --ignore-failed-read -czf "${PACKAGE_TMP}" -C "${WORK_BASE_DIR}" "${PACKAGE_NAME}" \
     || log "WARN" "tar completed with warnings — some recently-compacted SSTables may be missing from archive"
-sha256sum "${PACKAGE_FILE}" > "${PACKAGE_FILE}.sha256"
+sha256sum "${PACKAGE_TMP}" | sed "s|${PACKAGE_TMP}|${PACKAGE_FILE}|" > "${PACKAGE_FILE}.sha256"
+mv "${PACKAGE_TMP}" "${PACKAGE_FILE}"
 log "INFO" "Package size: $(du -sh "${PACKAGE_FILE}" | cut -f1)"
 log "INFO" "SHA-256: $(cat "${PACKAGE_FILE}.sha256")"
 
 # ── 8. CLEANUP & RETENTION ───────────────────────────────────────────────────
 rm -rf "${WORK_DIR}"
+find "${COHESITY_PICKUP_DIR}" -name "cassandra_backup_*.tar.gz.tmp" -delete 2>/dev/null || true
 find "${COHESITY_PICKUP_DIR}" -name "cassandra_backup_*.tar.gz" \
     -mmin "+${RETENTION_MINUTES}" -delete
 find "${COHESITY_PICKUP_DIR}" -name "cassandra_backup_*.tar.gz.sha256" \
