@@ -22,6 +22,17 @@ check_cassandra_alive() {
     fi
 }
 
+# Verifies that the Cohesity share is mounted at the given path.
+# Prevents scripts from writing to local disk if the share is down.
+check_cohesity_mounted() {
+    local mount_path="${1}"
+    if ! mountpoint -q "${mount_path}"; then
+        log "ERROR" "Cohesity share not mounted at ${mount_path}. Aborting to prevent writing to local disk."
+        log "ERROR" "Check mount: sudo mount ${mount_path}"
+        exit 1
+    fi
+}
+
 # Returns the list of non-system keyspaces.
 get_user_keyspaces() {
     local host="${1:-127.0.0.1}"

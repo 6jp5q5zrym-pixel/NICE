@@ -26,6 +26,7 @@ WORK_DIR="${WORK_BASE_DIR}/${PACKAGE_NAME}"
 
 log "INFO" "=== Semiannual archive started: ${PACKAGE_NAME} ==="
 check_cassandra_alive
+check_cohesity_mounted "${COHESITY_PICKUP_DIR%/*}"
 mkdir -p "${WORK_DIR}/schema" "${WORK_DIR}/data" "${COHESITY_PICKUP_DIR}"
 
 # 1 – Export schema (user keyspaces only)

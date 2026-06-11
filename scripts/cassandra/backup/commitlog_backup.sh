@@ -22,6 +22,7 @@ WORK_DIR="${WORK_BASE_DIR}/${PACKAGE_NAME}"
 
 log "INFO" "=== Commit log backup started: ${TIMESTAMP} ==="
 check_cassandra_alive
+check_cohesity_mounted "${COHESITY_PICKUP_DIR%/*}"
 mkdir -p "${WORK_DIR}" "${COHESITY_PICKUP_DIR}"
 
 # Roll the active commit log segment so the latest writes end up in a sealed
