@@ -13,6 +13,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CASSANDRA_USER="${CASSANDRA_USER:-cassandra}"
+ALERT_EMAIL="${ALERT_EMAIL:-}"   # set via env or edit here: export ALERT_EMAIL=admin@ibercaja.es
 CRON_FILE="/etc/cron.d/cassandra_backup"
 THIS_HOST=$(hostname -s)
 
@@ -24,6 +25,9 @@ install_primary() {
 # Node role: PRIMARY  (schema + daily + commitlog + semiannual)
 SHELL=/bin/bash
 PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+# MAILTO: cron envía el stderr del monitor por email si el check falla.
+# Descomentar cuando SMTP esté habilitado en ibsmtp.ibercaja.es.
+# MAILTO=${ALERT_EMAIL}
 
 # Schema export – daily at 00:50 (runs before daily snapshot)
 50 0 * * * ${CASSANDRA_USER} ${SCRIPT_DIR}/schema_backup.sh
@@ -55,6 +59,7 @@ install_commitlog_only() {
 # Node role: COMMITLOG  (commit log only for PITR resilience)
 SHELL=/bin/bash
 PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+# MAILTO=${ALERT_EMAIL}
 
 # Hourly commit log backup
 0 * * * * ${CASSANDRA_USER} ${SCRIPT_DIR}/commitlog_backup.sh

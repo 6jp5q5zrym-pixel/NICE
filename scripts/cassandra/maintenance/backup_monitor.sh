@@ -41,31 +41,38 @@ exec >> "${LOG_FILE}" 2>&1
 HOSTNAME_SHORT="${NODE:-$(hostname -s)}"
 FAILED=0
 
+# Sends alert to syslog (visible inmediatamente en /var/log/messages)
+# y a stderr (cron lo captura y manda por email si MAILTO está configurado).
+alert() {
+    local msg="$1"
+    logger -t cassandra_backup -p local0.err "ALERT [${HOSTNAME_SHORT}]: ${msg}"
+    echo "[ALERT] ${msg}" >&2
+}
+
 check_daily() {
     local pattern="cassandra_backup_${HOSTNAME_SHORT}_$(date +%Y%m%d)*.tar"
     local found
     found=$(find "${COHESITY_DAILY_DIR}" -name "${pattern}" -mmin "-${DAILY_MAX_AGE_MIN}" 2>/dev/null | head -1)
 
     if [[ -z "${found}" ]]; then
-        log "WARN" "MISSING daily backup for ${HOSTNAME_SHORT} — no file matching '${pattern}' in ${COHESITY_DAILY_DIR} newer than ${DAILY_MAX_AGE_MIN} min"
-        log "WARN" "Manual recovery: sudo ${SCRIPT_DIR}/../backup/daily_snapshot.sh"
+        alert "daily backup MISSING — no file matching '${pattern}' newer than ${DAILY_MAX_AGE_MIN} min en ${COHESITY_DAILY_DIR}"
+        alert "Relanzar manualmente: sudo ${SCRIPT_DIR}/../backup/daily_snapshot.sh"
         FAILED=1
     else
         local size
         size=$(du -sh "${found}" | cut -f1)
         log "INFO" "OK daily backup: $(basename "${found}") (${size})"
 
-        # Verify sha256 if present
         local sha_file="${found}.sha256"
         if [[ -f "${sha_file}" ]]; then
             if sha256sum --check --status "${sha_file}" 2>/dev/null; then
-                log "INFO" "OK sha256 verified: $(basename "${found}")"
+                log "INFO" "OK sha256 verificado: $(basename "${found}")"
             else
-                log "WARN" "SHA256 MISMATCH for $(basename "${found}") — file may be corrupt"
+                alert "SHA256 MISMATCH en $(basename "${found}") — fichero posiblemente corrupto"
                 FAILED=1
             fi
         else
-            log "WARN" "No sha256 file found for $(basename "${found}")"
+            log "WARN" "Sin fichero sha256 para $(basename "${found}")"
         fi
     fi
 }
@@ -76,8 +83,8 @@ check_commitlog() {
     found=$(find "${COHESITY_COMMITLOG_DIR}" -name "${pattern}" -mmin "-${COMMITLOG_MAX_AGE_MIN}" 2>/dev/null | head -1)
 
     if [[ -z "${found}" ]]; then
-        log "WARN" "MISSING commit log for ${HOSTNAME_SHORT} — no file matching '${pattern}' in ${COHESITY_COMMITLOG_DIR} newer than ${COMMITLOG_MAX_AGE_MIN} min"
-        log "WARN" "Manual recovery: sudo ${SCRIPT_DIR}/../backup/commitlog_backup.sh"
+        alert "commit log MISSING — no file matching '${pattern}' newer than ${COMMITLOG_MAX_AGE_MIN} min en ${COHESITY_COMMITLOG_DIR}"
+        alert "Relanzar manualmente: sudo ${SCRIPT_DIR}/../backup/commitlog_backup.sh"
         FAILED=1
     else
         local size
@@ -87,11 +94,10 @@ check_commitlog() {
 }
 
 check_semiannual() {
-    # Only meaningful in January and July — skip other months silently
     local month
     month=$(date +%m)
     if [[ "${month}" != "01" && "${month}" != "07" ]]; then
-        log "INFO" "Semiannual check skipped — not January or July"
+        log "INFO" "Semiannual check skipped — fuera de enero/julio"
         return
     fi
 
@@ -104,8 +110,8 @@ check_semiannual() {
     found=$(find "${COHESITY_ARCHIVE_DIR}" -name "${pattern}" 2>/dev/null | head -1)
 
     if [[ -z "${found}" ]]; then
-        log "WARN" "MISSING semiannual archive for ${HOSTNAME_SHORT} — no file matching '${pattern}' in ${COHESITY_ARCHIVE_DIR}"
-        log "WARN" "Manual recovery: sudo ${SCRIPT_DIR}/../backup/semiannual_archive.sh"
+        alert "semiannual archive MISSING — no file matching '${pattern}' en ${COHESITY_ARCHIVE_DIR}"
+        alert "Relanzar manualmente: sudo ${SCRIPT_DIR}/../backup/semiannual_archive.sh"
         FAILED=1
     else
         local size
