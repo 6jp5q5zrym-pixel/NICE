@@ -1,44 +1,93 @@
 #!/usr/bin/env bash
-# Installs cron entries for all Cassandra backup jobs.
-# Run once per node as root (or the cassandra OS user).
-# Scripts run on all nodes but only the primary CPD node should run
-# daily_snapshot.sh – set PRIMARY_CPD_NODE to this host's hostname.
+# Installs cron entries for this node based on its hostname.
 #
-# NOTE: semiannual_archive.sh is NOT installed here.
-# Add it manually after go-live with the confirmed date:
-#   echo "0 2 <DD> <MM> * cassandra <SCRIPT_DIR>/semiannual_archive.sh >> /logs/cassandra/backup/semiannual_archive.log 2>&1" \
-#     >> /etc/cron.d/cassandra_backup
+# Backup assignment:
+#   IBNICECAS01PRO  →  schema + daily snapshot + commit log + semiannual
+#   IBNICECAS02PRO  →  (no backup jobs — data identical to 01PRO, same DC)
+#   IBNICECAS03PRO  →  commit log only (PITR resilience if 01PRO is down)
+#   IBNICECAS04PRO  →  (no backup jobs — data identical to 03PRO, same DC)
+#
+# Run as root on each node:
+#   sudo bash install_cron.sh
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CASSANDRA_USER="${CASSANDRA_USER:-cassandra}"
-PRIMARY_CPD_NODE="${PRIMARY_CPD_NODE:-$(hostname)}"
-
 CRON_FILE="/etc/cron.d/cassandra_backup"
+THIS_HOST=$(hostname -s)
 
-cat > "${CRON_FILE}" <<EOF
+MONITOR_SCRIPT="${SCRIPT_DIR}/../maintenance/backup_monitor.sh"
+
+install_primary() {
+    cat > "${CRON_FILE}" <<EOF
 # Cassandra backup jobs – managed by install_cron.sh
+# Node role: PRIMARY  (schema + daily + commitlog + semiannual)
 SHELL=/bin/bash
 PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
 
-# Schema export – daily at 00:50 (before snapshot)
-50 0 * * * ${CASSANDRA_USER} ${SCRIPT_DIR}/schema_backup.sh >> /logs/cassandra/backup/schema_backup.log 2>&1
+# Schema export – daily at 00:50 (runs before daily snapshot)
+50 0 * * * ${CASSANDRA_USER} ${SCRIPT_DIR}/schema_backup.sh
 
-# Daily full snapshot – 01:00  (retention: 30 days, purged automatically by the script)
-0 1 * * * ${CASSANDRA_USER} ${SCRIPT_DIR}/daily_snapshot.sh >> /logs/cassandra/backup/daily_snapshot.log 2>&1
+# Daily full snapshot – 01:00
+0 1 * * * ${CASSANDRA_USER} ${SCRIPT_DIR}/daily_snapshot.sh
 
 # Hourly commit log backup
-0 * * * * ${CASSANDRA_USER} ${SCRIPT_DIR}/commitlog_backup.sh >> /logs/cassandra/backup/commitlog_backup.log 2>&1
+0 * * * * ${CASSANDRA_USER} ${SCRIPT_DIR}/commitlog_backup.sh
 
-# Semiannual archive: add manually after go-live confirmation.
-# Example (replace DD and MM with the actual date):
-# 0 2 DD MM * ${CASSANDRA_USER} ${SCRIPT_DIR}/semiannual_archive.sh >> /logs/cassandra/backup/semiannual_archive.log 2>&1
+# Semiannual archive – 1 January and 1 July at 02:00
+0 2 1 1,7 * ${CASSANDRA_USER} ${SCRIPT_DIR}/semiannual_archive.sh
+
+# Monitoring: verify daily backup arrived (runs at 05:00 — backup finishes ~03:30)
+0 5 * * * ${CASSANDRA_USER} ${MONITOR_SCRIPT} --check daily
+
+# Monitoring: verify commit log arrived every hour at :15
+15 * * * * ${CASSANDRA_USER} ${MONITOR_SCRIPT} --check commitlog
+
+# Monitoring: verify semiannual archive (runs daily, skips silently outside Jan/Jul)
+0 6 * * * ${CASSANDRA_USER} ${MONITOR_SCRIPT} --check semiannual
 EOF
+    echo "Installed PRIMARY cron (schema + daily + commitlog + semiannual + monitoring) on ${THIS_HOST}"
+}
 
-chmod 0644 "${CRON_FILE}"
-echo "Cron entries installed in ${CRON_FILE}"
-echo "Primary CPD node for snapshots: ${PRIMARY_CPD_NODE}"
-echo ""
-echo "PENDING: add semiannual_archive.sh cron entry manually after go-live date is confirmed."
-echo "NOTE: daily_snapshot.sh should only run on the primary CPD node."
-echo "      Remove that entry from secondary CPD nodes."
+install_commitlog_only() {
+    cat > "${CRON_FILE}" <<EOF
+# Cassandra backup jobs – managed by install_cron.sh
+# Node role: COMMITLOG  (commit log only for PITR resilience)
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+
+# Hourly commit log backup
+0 * * * * ${CASSANDRA_USER} ${SCRIPT_DIR}/commitlog_backup.sh
+
+# Monitoring: verify commit log arrived every hour at :15
+15 * * * * ${CASSANDRA_USER} ${MONITOR_SCRIPT} --check commitlog
+EOF
+    echo "Installed COMMITLOG-ONLY cron on ${THIS_HOST}"
+}
+
+remove_cron() {
+    if [[ -f "${CRON_FILE}" ]]; then
+        rm -f "${CRON_FILE}"
+        echo "Removed existing cron file on ${THIS_HOST}"
+    else
+        echo "No cron file to remove on ${THIS_HOST}"
+    fi
+    echo "This node has no backup role — no cron installed."
+}
+
+case "${THIS_HOST}" in
+    IBNICECAS01PRO) install_primary ;;
+    IBNICECAS03PRO) install_commitlog_only ;;
+    IBNICECAS02PRO|IBNICECAS04PRO) remove_cron ;;
+    *)
+        echo "WARNING: hostname '${THIS_HOST}' not recognised."
+        echo "Valid hostnames: IBNICECAS01PRO, IBNICECAS02PRO, IBNICECAS03PRO, IBNICECAS04PRO"
+        echo "No cron file written."
+        exit 1
+        ;;
+esac
+
+if [[ -f "${CRON_FILE}" ]]; then
+    chmod 0644 "${CRON_FILE}"
+    chown root:root "${CRON_FILE}"
+fi

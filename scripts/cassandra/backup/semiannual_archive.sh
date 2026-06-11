@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Semiannual long-term archive: full snapshot + CQL schema in one tar.gz.
-# Schedule: January 1 and July 1 at 02:00  →  cron: 0 2 1 1,7 *
+# Semiannual long-term archive: full snapshot + CQL schema in one tar.
+# No gzip — SSTables are already LZ4-compressed; double compression wastes CPU.
+# Schedule: January 1 and July 1 at 02:00  →  cron: 0 2 1 1,7 *  (IBNICECAS01PRO only)
 # Retention: 10 years (enforced by Cohesity storage policy, not this script).
 set -euo pipefail
 
@@ -75,11 +76,12 @@ cat > "${WORK_DIR}/manifest.json" <<EOF
 EOF
 
 # 5 – Package
+# No gzip (-c only): SSTables are already LZ4-compressed.
 # Write to .tmp first — Cohesity never snapshots a partial file.
-PACKAGE_FILE="${COHESITY_PICKUP_DIR}/${PACKAGE_NAME}.tar.gz"
+PACKAGE_FILE="${COHESITY_PICKUP_DIR}/${PACKAGE_NAME}.tar"
 PACKAGE_TMP="${PACKAGE_FILE}.tmp"
-log "INFO" "Compressing archive → ${PACKAGE_FILE}"
-tar --ignore-failed-read -czf "${PACKAGE_TMP}" -C "${WORK_BASE_DIR}" "${PACKAGE_NAME}" \
+log "INFO" "Packaging archive → ${PACKAGE_FILE}"
+tar --ignore-failed-read -cf "${PACKAGE_TMP}" -C "${WORK_BASE_DIR}" "${PACKAGE_NAME}" \
     || log "WARN" "tar completed with warnings — some recently-compacted SSTables may be missing from archive"
 sha256sum "${PACKAGE_TMP}" | sed "s|${PACKAGE_TMP}|${PACKAGE_FILE}|" > "${PACKAGE_FILE}.sha256"
 mv "${PACKAGE_TMP}" "${PACKAGE_FILE}"

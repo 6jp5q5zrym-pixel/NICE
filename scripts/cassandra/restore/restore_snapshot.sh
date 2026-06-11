@@ -65,7 +65,7 @@ log "INFO" "======================================================"
 rm -rf "${EXTRACT_DIR}"
 mkdir -p "${EXTRACT_DIR}"
 log "INFO" "Extracting package..."
-tar -xzf "${PACKAGE_FILE}" -C "${EXTRACT_DIR}"
+tar -xf "${PACKAGE_FILE}" -C "${EXTRACT_DIR}"
 
 PACKAGE_DIR=$(find "${EXTRACT_DIR}" -maxdepth 1 -mindepth 1 -type d | head -1)
 SCHEMA_FILE="${PACKAGE_DIR}/schema/schema.cql"

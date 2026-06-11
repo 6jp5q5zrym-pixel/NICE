@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Produces a self-contained backup package per node:
-#   cassandra_backup_<HOSTNAME>_<TIMESTAMP>.tar.gz
+#   cassandra_backup_<HOSTNAME>_<TIMESTAMP>.tar
 # Contents: CQL schema + SSTable snapshot files + manifest.
+# No gzip — SSTables are already LZ4-compressed; double compression wastes CPU.
 # Cohesity picks up COHESITY_PICKUP_DIR – no direct integration needed.
-# Schedule: daily at 01:00  →  cron: 0 1 * * *
+# Schedule: daily at 01:00  →  cron: 0 1 * * *  (IBNICECAS01PRO only)
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -88,13 +89,15 @@ cat > "${WORK_DIR}/manifest.json" <<EOF
 }
 EOF
 
-# ── 7. PACKAGE INTO TAR.GZ ───────────────────────────────────────────────────
+# ── 7. PACKAGE INTO TAR ──────────────────────────────────────────────────────
+# No gzip (-c only): SSTables are already LZ4-compressed; gzip on pre-compressed
+# data wastes CPU without meaningful size reduction.
 # Write to .tmp first — Cohesity never snapshots a partial file.
 # Only rename to final name once tar + sha256 are both complete.
-PACKAGE_FILE="${COHESITY_PICKUP_DIR}/${PACKAGE_NAME}.tar.gz"
+PACKAGE_FILE="${COHESITY_PICKUP_DIR}/${PACKAGE_NAME}.tar"
 PACKAGE_TMP="${PACKAGE_FILE}.tmp"
 log "INFO" "Creating package → ${PACKAGE_FILE}"
-tar --ignore-failed-read -czf "${PACKAGE_TMP}" -C "${WORK_BASE_DIR}" "${PACKAGE_NAME}" \
+tar --ignore-failed-read -cf "${PACKAGE_TMP}" -C "${WORK_BASE_DIR}" "${PACKAGE_NAME}" \
     || log "WARN" "tar completed with warnings — some recently-compacted SSTables may be missing from archive"
 sha256sum "${PACKAGE_TMP}" | sed "s|${PACKAGE_TMP}|${PACKAGE_FILE}|" > "${PACKAGE_FILE}.sha256"
 mv "${PACKAGE_TMP}" "${PACKAGE_FILE}"
@@ -103,10 +106,10 @@ log "INFO" "SHA-256: $(cat "${PACKAGE_FILE}.sha256")"
 
 # ── 8. CLEANUP & RETENTION ───────────────────────────────────────────────────
 rm -rf "${WORK_DIR}"
-find "${COHESITY_PICKUP_DIR}" -name "cassandra_backup_*.tar.gz.tmp" -delete 2>/dev/null || true
-find "${COHESITY_PICKUP_DIR}" -name "cassandra_backup_*.tar.gz" \
+find "${COHESITY_PICKUP_DIR}" -name "cassandra_backup_*.tar.tmp" -delete 2>/dev/null || true
+find "${COHESITY_PICKUP_DIR}" -name "cassandra_backup_*.tar" \
     -mmin "+${RETENTION_MINUTES}" -delete
-find "${COHESITY_PICKUP_DIR}" -name "cassandra_backup_*.tar.gz.sha256" \
+find "${COHESITY_PICKUP_DIR}" -name "cassandra_backup_*.tar.sha256" \
     -mmin "+${RETENTION_MINUTES}" -delete
 log "INFO" "Purged packages older than ${RETENTION_MINUTES} minutes ($(( RETENTION_MINUTES / 60 ))h)"
 
