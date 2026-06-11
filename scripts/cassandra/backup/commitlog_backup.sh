@@ -11,7 +11,7 @@ COMMITLOG_DIR="${COMMITLOG_DIR:-/datos/dse-data/commitlog}"
 COHESITY_PICKUP_DIR="${COHESITY_PICKUP_DIR:-/mnt/cohesity/commitlogs}"
 WORK_BASE_DIR="${WORK_BASE_DIR:-/datos/backup_staging}"
 LOG_FILE="${LOG_DIR}/commitlog_backup.log"
-RETENTION_MINUTES="${RETENTION_MINUTES:-2880}"
+RETENTION_MINUTES="${RETENTION_MINUTES:-180}"
 
 exec >> "${LOG_FILE}" 2>&1
 
