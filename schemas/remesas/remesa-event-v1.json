@@ -1,0 +1,156 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "remesa-event-v1.json",
+  "title": "RemittanceTransactionEvent",
+  "description": "Evento de transacción de remesa para ingestión en NICE Actimize (SAM/WLF)",
+  "version": "1.0.0",
+  "type": "object",
+  "required": ["messageHeader", "transaction"],
+  "properties": {
+    "messageHeader": {
+      "type": "object",
+      "required": ["messageId", "messageType", "sourceSystem", "timestamp", "schemaVersion"],
+      "properties": {
+        "messageId":     { "type": "string", "maxLength": 50, "description": "ID único del mensaje" },
+        "messageType":   { "type": "string", "enum": ["REMITTANCE_TXN"], "description": "Tipo de mensaje" },
+        "sourceSystem":  { "type": "string", "maxLength": 30, "description": "Sistema origen (SWIFT_GW, CORE_BANKING, MTO...)" },
+        "timestamp":     { "type": "string", "format": "date-time", "description": "ISO 8601 UTC" },
+        "schemaVersion": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+$" },
+        "entityId":      { "type": "string", "maxLength": 10, "description": "Código entidad bancaria Actimize" }
+      }
+    },
+    "transaction": {
+      "type": "object",
+      "required": ["transactionId", "transactionType", "valueDate", "amount", "currency", "originator", "beneficiary"],
+      "properties": {
+        "transactionId":   { "type": "string", "maxLength": 50, "description": "Referencia única :20: MT103 / EndToEndId ISO20022" },
+        "uetr":            { "type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$", "description": "SWIFT gpi UETR (UUID v4)" },
+        "swiftRef":        { "type": "string", "maxLength": 16, "description": "Campo :20: del MT103" },
+        "endToEndId":      { "type": "string", "maxLength": 35, "description": "EndToEndId ISO 20022" },
+        "transactionType": { "type": "string", "enum": ["REMESA", "WIRE", "SEPA_SCT", "SEPA_SCT_INST", "MTO"], "description": "Tipo de transferencia" },
+        "channel":         { "type": "string", "enum": ["ONLINE", "BRANCH", "API", "SWIFT", "MTO"], "description": "Canal de iniciación" },
+        "paymentMethod":   { "type": "string", "enum": ["SWIFT_MT103", "PACS008", "SEPA_CT", "INTERNAL"], "description": "Estándar de mensajería" },
+        "valueDate":       { "type": "string", "format": "date", "description": "Fecha valor YYYY-MM-DD" },
+        "processingDatetime": { "type": "string", "format": "date-time" },
+        "amount":          { "type": "number", "minimum": 0.01, "description": "Importe en divisa origen" },
+        "currency":        { "type": "string", "pattern": "^[A-Z]{3}$", "description": "ISO 4217" },
+        "equivEurAmount":  { "type": "number", "minimum": 0.01, "description": "Contravalor EUR (calculado por sistema fuente)" },
+        "fxRate":          { "type": "number", "minimum": 0, "description": "Tipo de cambio aplicado" },
+        "chargeType":      { "type": "string", "enum": ["OUR", "SHA", "BEN"], "description": "Campo :71A: MT103" },
+        "purposeCode":     { "type": "string", "maxLength": 4, "description": "ISO 20022 ExternalPurpose1Code (FAMI, SUPP, SALA, TRAD...)" },
+        "remittanceInfo":  { "type": "string", "maxLength": 140, "description": "Concepto :70: MT103 / RmtInf ISO20022" },
+        "regulatoryReporting": { "type": "string", "maxLength": 500, "description": "Campo :77B: MT103" },
+        "originator": {
+          "type": "object",
+          "required": ["name", "account", "country"],
+          "description": "Datos del ordenante — Travel Rule FATF R.16",
+          "properties": {
+            "name":             { "type": "string", "maxLength": 140 },
+            "account":          { "type": "string", "maxLength": 34, "description": "IBAN o cuenta local" },
+            "bic":              { "type": "string", "pattern": "^[A-Z]{6}[A-Z0-9]{2}([A-Z0-9]{3})?$" },
+            "country":          { "type": "string", "pattern": "^[A-Z]{2}$", "description": "ISO 3166-1 alpha-2" },
+            "address":          { "type": "string", "maxLength": 255 },
+            "city":             { "type": "string", "maxLength": 35 },
+            "idType":           { "type": "string", "enum": ["DNI", "NIE", "PASSPORT", "CIF", "OTHER"] },
+            "idNumber":         { "type": "string", "maxLength": 35 },
+            "internalCif":      { "type": "string", "maxLength": 20, "description": "ID cliente interno del banco" },
+            "dateOfBirth":      { "type": "string", "format": "date" },
+            "placeOfBirth":     { "type": "string", "maxLength": 70 }
+          }
+        },
+        "beneficiary": {
+          "type": "object",
+          "required": ["name", "account", "country"],
+          "description": "Datos del beneficiario — Travel Rule FATF R.16",
+          "properties": {
+            "name":         { "type": "string", "maxLength": 140 },
+            "account":      { "type": "string", "maxLength": 34 },
+            "bic":          { "type": "string", "pattern": "^[A-Z]{6}[A-Z0-9]{2}([A-Z0-9]{3})?$" },
+            "bankName":     { "type": "string", "maxLength": 140 },
+            "country":      { "type": "string", "pattern": "^[A-Z]{2}$" },
+            "address":      { "type": "string", "maxLength": 255 }
+          }
+        },
+        "correspondents": {
+          "type": "array",
+          "maxItems": 4,
+          "description": "Bancos corresponsales en la cadena de pago",
+          "items": {
+            "type": "object",
+            "properties": {
+              "bic":     { "type": "string" },
+              "country": { "type": "string", "pattern": "^[A-Z]{2}$" },
+              "role":    { "type": "string", "enum": ["SENDING", "INTERMEDIARY", "RECEIVING"] }
+            }
+          }
+        },
+        "riskIndicators": {
+          "type": "object",
+          "description": "Flags de riesgo pre-calculados en sistema fuente",
+          "properties": {
+            "highRiskCountry":    { "type": "boolean", "description": "Beneficiario en país FATF lista gris/negra" },
+            "fatfGreyList":       { "type": "boolean" },
+            "fatfBlackList":      { "type": "boolean" },
+            "sanctionsCountry":   { "type": "boolean" },
+            "pepFlag":            { "type": "boolean", "description": "Persona Políticamente Expuesta (PEP)" },
+            "sanctionsPreScreened": { "type": "boolean", "description": "Ya pasó screening WLF en canal originador" },
+            "travelRuleComplete": { "type": "boolean", "description": "Campos Travel Rule completos según FATF R.16" }
+          }
+        }
+      }
+    }
+  },
+  "examples": [
+    {
+      "messageHeader": {
+        "messageId": "MSG-20240612-001234",
+        "messageType": "REMITTANCE_TXN",
+        "sourceSystem": "SWIFT_GW",
+        "timestamp": "2024-06-12T10:00:00Z",
+        "schemaVersion": "1.0",
+        "entityId": "BBVAES"
+      },
+      "transaction": {
+        "transactionId": "REF20240612001",
+        "uetr": "97ed4827-7b6f-4491-a06f-b548d5a7512d",
+        "transactionType": "REMESA",
+        "channel": "ONLINE",
+        "paymentMethod": "SWIFT_MT103",
+        "valueDate": "2024-06-12",
+        "amount": 850.00,
+        "currency": "EUR",
+        "equivEurAmount": 850.00,
+        "fxRate": 1.0,
+        "chargeType": "SHA",
+        "purposeCode": "FAMI",
+        "remittanceInfo": "REMESA FAMILIAR JUNIO 2024",
+        "originator": {
+          "name": "GARCIA LOPEZ JUAN",
+          "account": "ES9121000418450200051332",
+          "bic": "BBVAESMMXXX",
+          "country": "ES",
+          "address": "CALLE MAYOR 10, MADRID",
+          "idType": "DNI",
+          "idNumber": "12345678A",
+          "internalCif": "CIF123456"
+        },
+        "beneficiary": {
+          "name": "GARCIA MARIA",
+          "account": "MX123456789012345678",
+          "bic": "BBVAMXMMXXX",
+          "bankName": "BBVA MEXICO",
+          "country": "MX"
+        },
+        "riskIndicators": {
+          "highRiskCountry": false,
+          "fatfGreyList": false,
+          "fatfBlackList": false,
+          "sanctionsCountry": false,
+          "pepFlag": false,
+          "sanctionsPreScreened": false,
+          "travelRuleComplete": true
+        }
+      }
+    }
+  ]
+}
