@@ -703,7 +703,225 @@ Ubicación: Batch Processes/BulkPayments/ — paquete Fraud Framework - Executab
 
 ---
 
-## 19. Preguntas Pendientes de Confirmar con NICE/Implementador
+## 19. Estructura XML del Fichero de Entrada — Mapeo Completo
+
+El XML sigue una jerarquía de **4 niveles**. Cada nivel tiene sus propios nodos con tipos IFM específicos.
+
+### Opciones de validación XSD
+
+| Opción | Ventaja | Inconveniente |
+|--------|---------|---------------|
+| **Con validación XSD** (recomendado) | Detecta errores estructurales antes del parsing | Los campos deben ir en el orden del XSD |
+| **Sin validación XSD** | Campos dentro de un elemento en cualquier orden | Un error estructural no se detecta y el parser falla sin mensaje claro |
+
+> Para implementación inicial: **activar validación XSD**. Facilita el debugging durante el desarrollo.
+
+---
+
+### Nivel 1: Logical Group
+
+Agrupa uno o más Bulk Payments. Campos opcionales para remesas batch (sin canal digital).
+
+```xml
+<LogicalGroup>
+    <!-- Opcionales / no aplican en remesas SWIFT/SEPA batch -->
+    <HTTPHeader>...</HTTPHeader>                          <!-- IFMHTTPHeaderTypeV2 -->
+    <MobileDeviceData>...</MobileDeviceData>              <!-- IFMMobileDeviceType -->
+    <OnlineDeviceIdentifiers>...</OnlineDeviceIdentifiers><!-- IFMOnlineDeviceIdentifiersType -->
+    <CalculatedOnlineDeviceIdentifiers>...</CalculatedOnlineDeviceIdentifiers>
+    <OnlineSession>...</OnlineSession>                    <!-- IFMOnlineSessionTypeV2 -->
+    <PhoneSession>...</PhoneSession>                      <!-- IFMPhoneSessionType -->
+    <WebDevice>...</WebDevice>                            <!-- IFMWebDeviceType -->
+
+    <!-- PartyReference: datos del cliente ordenante a nivel de sesión -->
+    <PartyReference>                                      <!-- IFMPartyReferenceType -->
+        <PartyData>...</PartyData>                        <!-- IFMPartyDataType -->
+        <AccountOwnershipData>...</AccountOwnershipData>  <!-- IFMAccountOwnershipType -->
+        <AddressData>...</AddressData>                    <!-- IFMAddressTypeV2 -->
+        <ContactData>...</ContactData>                    <!-- IFMContactReferenceType -->
+        <ReferenceUpdateDates>...</ReferenceUpdateDates>  <!-- IFMReferenceUpdateDatesType -->
+    </PartyReference>
+
+    <!-- UserReference: datos del usuario que inicia la operación -->
+    <UserReference>                                       <!-- IFMUserReferenceType -->
+        <AddressData>...</AddressData>
+        <ContactData>...</ContactData>
+        <ReferenceUpdateDates>...</ReferenceUpdateDates>
+    </UserReference>
+
+    <CustomData>...</CustomData>                          <!-- IFMCustomDataType -->
+
+    <!-- Uno o más BulkPayment -->
+    <BulkPayment>...</BulkPayment>
+</LogicalGroup>
+```
+
+**Para remesas SWIFT/SEPA batch:** Omitir todos los nodos de dispositivo (HTTP, Mobile, Online, Web, Phone). Pueden ser útiles `PartyReference` (datos KYC del ordenante) y `CustomData` (campos propietarios).
+
+---
+
+### Nivel 2: BulkPayment
+
+Representa un lote de remesas (equivale a un batch del Core Banking).
+
+```xml
+<BulkPayment>
+    <!-- Datos base del lote -->
+    <BaseTransactionA>...</BaseTransactionA>              <!-- IFMBaseTransactionAType -->
+    <BaseTransactionC>...</BaseTransactionC>              <!-- IFMBaseTransactionCType -->
+    <MonetaryTransactionA>...</MonetaryTransactionA>      <!-- IFMMonetaryTransactionAType -->
+
+    <!-- Cuenta debitada (cuenta del banco/entidad que origina el lote) -->
+    <AccountReference>                                    
+        <AccountData>...</AccountData>                    <!-- IFMAccountReferenceType -->
+        <AddressData>...</AddressData>                    <!-- no usada por analytics -->
+        <ContactData>...</ContactData>                    <!-- no usada por analytics -->
+        <ReferenceUpdateDates>...</ReferenceUpdateDates>  <!-- no usada por analytics -->
+        <AccountPartyRelationData>...</AccountPartyRelationData> <!-- IFMPartyRelationReferenceType -->
+    </AccountReference>
+
+    <!-- Metadatos del lote (fecha proceso, secuencia, etc.) -->
+    <BulkPaymentMetadata>...</BulkPaymentMetadata>        <!-- IFMBulkPaymentMetadataType -->
+
+    <!-- Parte monitorizadda: el ordenante del lote -->
+    <TrxMonitoredParty>
+        <TrxPartyData>...</TrxPartyData>                  <!-- IFMTrxPartyDataType -->
+    </TrxMonitoredParty>
+
+    <RejectData>...</RejectData>                          <!-- IFMRejectDataTypeV2 -->
+    <CustomData>...</CustomData>                          <!-- IFMCustomDataType -->
+
+    <!-- Una o más Entry -->
+    <Entry>...</Entry>
+</BulkPayment>
+```
+
+**Campos clave para remesas a nivel BulkPayment:**
+- `BaseTransactionA` → ID del lote, timestamp, referencia
+- `MonetaryTransactionA` → importe total del lote, divisa
+- `AccountReference/AccountData` → cuenta de la entidad originadora (IBAN o cuenta nostro)
+- `BulkPaymentMetadata` → fecha de proceso, secuencia del fichero
+- `TrxMonitoredParty/TrxPartyData` → datos del cliente ordenante (nombre, ID, CIF interno)
+
+---
+
+### Nivel 3: Entry
+
+Representa **una remesa individual**. Es el nivel donde IFM aplica la detección de fraude por transacción.
+
+```xml
+<Entry>
+    <!-- Identificación de la transacción -->
+    <BaseTransactionB>...</BaseTransactionB>              <!-- IFMBaseTransactionBType -->
+    <BaseTransactionC>...</BaseTransactionC>              <!-- IFMBaseTransactionCType -->
+    <MonetaryTransactionB>...</MonetaryTransactionB>      <!-- IFMMonetaryTransactionBType -->
+
+    <!-- Cuenta ordenante (IBAN del cliente) -->
+    <AccountReference>
+        <AccountData>...</AccountData>                    <!-- IFMAccountReferenceType -->
+        <AddressData>...</AddressData>                    <!-- no usada por analytics -->
+        <ContactData>...</ContactData>                    <!-- no usada por analytics -->
+        <ReferenceUpdateDates>...</ReferenceUpdateDates>  <!-- no usada por analytics -->
+        <AccountPartyRelationData>...</AccountPartyRelationData>
+    </AccountReference>
+
+    <!-- Importe de la remesa -->
+    <Amount>...</Amount>                                  <!-- IFMAmountTypeV2 -->
+
+    <!-- Cuenta beneficiaria -->
+    <PayeeAccountReference>
+        <AccountData>...</AccountData>                    <!-- IFMAccountReferenceType -->
+        <AddressData>...</AddressData>                    <!-- IFMAddressTypeV2 -->
+        <ContactData>...</ContactData>
+        <ReferenceUpdateDates>...</ReferenceUpdateDates>
+        <AccountPartyRelationData>...</AccountPartyRelationData>
+    </PayeeAccountReference>
+
+    <!-- Payee gestionado (beneficiario registrado previamente) -->
+    <ManagedPayee>...</ManagedPayee>                      <!-- IFMManagedPayeeType -->
+
+    <!-- Datos completos del beneficiario (Travel Rule) -->
+    <PayeePartyReference>                                 <!-- IFMPartyReferenceType -->
+        <PartyData>...</PartyData>                        <!-- IFMPartyDataType -->
+        <AccountOwnershipData>...</AccountOwnershipData>
+        <AddressData>...</AddressData>                    <!-- IFMAddressTypeV2 -->
+        <ContactData>...</ContactData>
+        <ReferenceUpdateDates>...</ReferenceUpdateDates>
+    </PayeePartyReference>
+
+    <!-- Detalles de la transferencia (BIC, tipo pago, concepto) -->
+    <TransferTransaction>...</TransferTransaction>        <!-- IFMTransferTransactionTypeV2 -->
+
+    <!-- Cuenta monitorizadda del ordenante a nivel transacción -->
+    <TrxMonitoredAccount>
+        <TrxAccountData>...</TrxAccountData>              <!-- IFMTrxAccountDataType -->
+    </TrxMonitoredAccount>
+
+    <!-- Dirección del ordenante (Travel Rule) -->
+    <TrxPartyAddress>
+        <AddressData>...</AddressData>                    <!-- IFMAddressTypeV2 -->
+    </TrxPartyAddress>
+
+    <!-- Cuenta beneficiaria a nivel transacción -->
+    <TrxPayeeAccount>
+        <TrxAccountData>...</TrxAccountData>              <!-- IFMTrxAccountDataType -->
+    </TrxPayeeAccount>
+
+    <!-- Datos del beneficiario a nivel transacción -->
+    <TrxPayeeParty>
+        <TrxPartyData>...</TrxPartyData>                  <!-- IFMTrxPartyDataType -->
+    </TrxPayeeParty>
+
+    <!-- Dirección del beneficiario (Travel Rule) -->
+    <TrxPayeeAddress>
+        <AddressData>...</AddressData>                    <!-- IFMAddressTypeV2 -->
+    </TrxPayeeAddress>
+
+    <CustomData>...</CustomData>                          <!-- IFMCustomDataType -->
+</Entry>
+```
+
+---
+
+### Mapeo orientativo: Core Banking → XML IFM (Entry)
+
+| Campo Core Banking (REMITTANCE_TXN / CUSTOMER) | Nodo XML IFM | Business Section |
+|------------------------------------------------|-------------|-----------------|
+| `r.TRN_ID` | `BaseTransactionB` | Base Transaction B |
+| `r.UETR` | `BaseTransactionB` | Base Transaction B |
+| `r.VALUE_DATE` / `r.PROCESS_DT` | `BaseTransactionB` | Base Transaction B |
+| `r.AMOUNT` / `r.CURRENCY` | `Amount` | Amount |
+| `r.EQUIV_EUR_AMOUNT` | `Amount` | Amount |
+| `r.FX_RATE` | `MonetaryTransactionB` | Monetary Transaction B |
+| `c.ACCOUNT_IBAN` | `AccountReference/AccountData` | Account Reference |
+| `c.FULL_NAME` | `TrxMonitoredParty/TrxPartyData` (bulk) | Trx Monitored Party Data |
+| `c.COUNTRY_CODE` / `c.ADDRESS` | `TrxPartyAddress/AddressData` | Trx Party Address |
+| `c.ID_TYPE` / `c.ID_NUMBER` | `TrxMonitoredParty/TrxPartyData` | Trx Monitored Party Data |
+| `c.INTERNAL_CIF` | `TrxMonitoredParty/TrxPartyData` | Trx Monitored Party Data |
+| `r.BENEFICIARY_NAME` | `PayeePartyReference/PartyData` | Payee Party Reference |
+| `r.BENEFICIARY_ACCOUNT` | `PayeeAccountReference/AccountData` | Payee Account Reference |
+| `r.RECEIVER_BIC` | `TransferTransaction` | Transfer Transaction |
+| `r.RECEIVER_COUNTRY` / `r.RECEIVER_ADDRESS` | `TrxPayeeAddress/AddressData` | Trx Payee Address |
+| `r.INTERMEDIARY_BIC` | `TransferTransaction` | Transfer Transaction |
+| `r.TXN_TYPE` / `r.PURPOSE_CODE` / `r.PAYMENT_METHOD` | `BaseTransactionB` / `MonetaryTransactionB` | Base / Monetary Transaction B |
+| `r.REMITTANCE_INFO` | `TransferTransaction` | Transfer Transaction |
+| `r.CHARGE_TYPE` | `MonetaryTransactionB` | Monetary Transaction B |
+| `r.SENDER_BIC` | `TransferTransaction` | Transfer Transaction |
+
+> **Pendiente confirmar con Master Data Model:** Los campos concretos dentro de cada tipo IFM (p.ej. cómo se llama el campo `TRN_ID` dentro de `IFMBaseTransactionBType`). Con la pestaña Master Data Model se puede completar esta tabla con los nombres exactos de elemento XML.
+
+---
+
+### Notas importantes del interfaz
+
+1. `CustomData` aparece en **3 niveles**: Logical Group, BulkPayment y Entry
+2. `BaseTransactionC` aparece en **2 niveles**: BulkPayment y Entry
+3. `AccountReference` aparece en **2 niveles**: BulkPayment y Entry
+4. Los nodos `AccountReference/AddressData`, `AccountReference/ContactData` y `AccountReference/ReferenceUpdateDates` **no son usados por analytics** en el proceso Bulk Payments
+
+---
+
+## 20. Preguntas Pendientes de Confirmar con NICE/Implementador
 
 1. **Esquema XSD**: ¿Tenemos acceso al `Interfaces/XSD/Bulk Payments Process/` de la instalación IFM? Necesitamos el XSD para generar XML válido.
 2. **Master Feed Excel**: ¿Disponemos del fichero Excel con el mapeo de campos (columna `Element Name In Hierarchical Input`)?
