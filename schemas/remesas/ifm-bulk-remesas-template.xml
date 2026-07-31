@@ -1,0 +1,397 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!--
+    Plantilla XML para ingestión de remesas en NICE Actimize IFM-X
+    Schema: FF_bulkPaymentsXml_V1.xsd
+
+    Nodos omitidos (no aplican en remesas SWIFT/SEPA batch):
+      - HTTPHeader, MobileDeviceData, OnlineDeviceIdentifiers,
+        CalculatedOnlineDeviceIdentifiers, OnlineSession, PhoneSession, WebDevice
+      - AccountReference/AddressData|ContactData|ReferenceUpdateDates (no usados por analytics)
+      - ManagedPayee (solo para payees registrados en el sistema)
+      - PayeePartyReference/AccountOwnershipData
+      - RejectData (rellenar solo si la operación fue rechazada)
+
+    Valores a sustituir marcados con: <!-- CAMPO: descripcion - ->
+    Campos opcionales marcados con: <!-- OPCIONAL - ->
+-->
+<Request xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:noNamespaceSchemaLocation="FF_bulkPaymentsXml_V1.xsd">
+    <LogicalGroups>
+        <LogicalGroup>
+
+            <!--
+                PartyReference: datos KYC del cliente ordenante (nivel sesión/lote).
+                Rellenar con datos del cliente principal del lote.
+            -->
+            <PartyReference>
+                <PartyData>
+                    <Name><!-- CAMPO: c.FULL_NAME - nombre completo del ordenante --></Name>
+                    <LastName><!-- OPCIONAL: apellido si está separado --></LastName>
+                    <PartyType>INDIVIDUAL</PartyType>  <!-- INDIVIDUAL | ORGANIZATION -->
+                    <TaxId><!-- CAMPO: c.ID_NUMBER - DNI/NIE/Pasaporte/CIF --></TaxId>
+                    <BirthIncorpDate><!-- OPCIONAL: fecha nacimiento YYYY-MM-DDThh:mm:ss+HH:MM --></BirthIncorpDate>
+                    <OnlineServiceJoinDate><!-- OPCIONAL: fecha alta cliente --></OnlineServiceJoinDate>
+                    <EffectiveDate><!-- OPCIONAL: fecha efectiva del registro --></EffectiveDate>
+                    <IsOurEmployee>0</IsOurEmployee>
+                </PartyData>
+                <AddressData>
+                    <AddressLine1><!-- CAMPO: c.ADDRESS --></AddressLine1>
+                    <City><!-- OPCIONAL --></City>
+                    <CountryCd><!-- CAMPO: c.COUNTRY_CODE - ISO 3166-1 alpha-2, ej: ES --></CountryCd>
+                    <ZipPostcode><!-- OPCIONAL --></ZipPostcode>
+                </AddressData>
+                <ContactData>
+                    <Email><!-- OPCIONAL --></Email>
+                    <MobilePhone><!-- OPCIONAL --></MobilePhone>
+                    <Phone><!-- OPCIONAL --></Phone>
+                </ContactData>
+                <ReferenceUpdateDates>
+                    <InfoUpdateDate><!-- OPCIONAL: última actualización de datos --></InfoUpdateDate>
+                </ReferenceUpdateDates>
+            </PartyReference>
+
+            <!--
+                CustomData a nivel Logical Group: campos propietarios del banco.
+                Usar Cs1-Cs225 (string), Cn1-Cn80 (numérico), Cd1-Cd75 (datetime), Cb1-Cb75 (boolean).
+                Acordar con NICE qué campos mapear aquí.
+            -->
+            <!-- <CustomData><Cs1>...</Cs1></CustomData> -->
+
+            <BulkPayments>
+                <BulkPayment>
+                    <!--
+                        BaseTransactionA: datos de la sesión/canal que origina el lote.
+                        Para remesas batch nocturnas: Channel=BATCH, no hay usuario ni terminal.
+                    -->
+                    <BaseTransactionA>
+                        <Channel>BATCH</Channel>  <!-- WEB | BRANCH | API | BATCH | SWIFT | MTO -->
+                        <TransactionNormalizedDateTime><!-- CAMPO: r.PROCESS_DT en UTC, ej: 2024-06-12T02:00:00.000+00:00 --></TransactionNormalizedDateTime>
+                        <TransactionLocalDateTime><!-- CAMPO: r.PROCESS_DT hora local sin timezone --></TransactionLocalDateTime>
+                        <TransactionSendingSystemCd>CORE_BANKING</TransactionSendingSystemCd>
+                        <SourceCd><!-- CAMPO: r.CHANNEL - canal origen de las remesas --></SourceCd>
+                        <!-- OPCIONAL:
+                        <BranchKey>código sucursal</BranchKey>
+                        <PartyKey>clave del cliente ordenante en IFM</PartyKey>
+                        <UserId>usuario operador</UserId>
+                        <ExecutingUserId>usuario ejecutor</ExecutingUserId>
+                        -->
+                    </BaseTransactionA>
+
+                    <!--
+                        BaseTransactionC: identificación única del bulk payment.
+                        TransactionKey debe ser único por bulk payment en todo el sistema.
+                    -->
+                    <BaseTransactionC>
+                        <TransactionKey><!-- CAMPO: ID único del lote, ej: BATCH_BANCOES_20240612_001 --></TransactionKey>
+                        <TransactionType>INTERNATIONAL</TransactionType>  <!-- DOMESTIC | INTERNATIONAL -->
+                        <TransactionOriginationSystemCd>CORE_BANKING</TransactionOriginationSystemCd>
+                    </BaseTransactionC>
+
+                    <!--
+                        MonetaryTransactionA: metadatos del fichero/lote batch.
+                        IsOriginated=1 siempre (IFM solo admite batches originados).
+                    -->
+                    <MonetaryTransactionA>
+                        <IsOriginated>1</IsOriginated>
+                        <BatchId><!-- CAMPO: nombre del fichero batch, ej: REMESAS_BANCOES_20240612_020000_001.xml --></BatchId>
+                        <LogicalInputFileCreationDateTime><!-- CAMPO: timestamp generación fichero, ej: 2024-06-12T02:00:00.000+01:00 --></LogicalInputFileCreationDateTime>
+                        <LogicalInputFileCreationNormalizedDateTime><!-- CAMPO: ídem en UTC --></LogicalInputFileCreationNormalizedDateTime>
+                        <LogicalFileSequenceId><!-- CAMPO: secuencia del fichero, ej: 001 --></LogicalFileSequenceId>
+                    </MonetaryTransactionA>
+
+                    <!--
+                        AccountReference: cuenta de la entidad originadora del lote
+                        (cuenta nostro del banco o cuenta de la entidad en IFM).
+                    -->
+                    <AccountReference>
+                        <AccountData>
+                            <AccountName><!-- CAMPO: nombre de la cuenta/entidad, ej: BANCOES REMESAS --></AccountName>
+                            <AccountType><!-- tipo de cuenta, ej: NOSTRO | VOSTRO | CHECKING --></AccountType>
+                            <PrimaryPartyKey><!-- clave del cliente principal en IFM --></PrimaryPartyKey>
+                            <!-- OPCIONAL:
+                            <LedgerBalance>saldo contable</LedgerBalance>
+                            <OpenDate>fecha apertura</OpenDate>
+                            <Status>ACTIVE</Status>
+                            <HoldingBranchKey>sucursal titular</HoldingBranchKey>
+                            -->
+                        </AccountData>
+                        <!-- AddressData, ContactData, ReferenceUpdateDates omitidos: no usados por analytics -->
+                        <AccountPartyRelationData>
+                            <PartyRelationType>OWNER</PartyRelationType>
+                            <StartDate><!-- OPCIONAL: fecha inicio relación --></StartDate>
+                        </AccountPartyRelationData>
+                    </AccountReference>
+
+                    <!--
+                        BulkPaymentMetadata: contadores y totales del lote.
+                        EntriesCategoryCd: CD (crédito/débito mixto), CR (solo crédito), DR (solo débito).
+                    -->
+                    <BulkPaymentMetadata>
+                        <EntriesCategoryCd>CR</EntriesCategoryCd>  <!-- para remesas salientes: DR; entrantes: CR -->
+                        <DebitEntryCount><!-- CAMPO: número de remesas salientes en el lote --></DebitEntryCount>
+                        <CreditEntryCount><!-- CAMPO: número de remesas entrantes en el lote (0 si solo salientes) --></CreditEntryCount>
+                        <EntryAndAddendaCount><!-- CAMPO: total de entries + registros addenda --></EntryAndAddendaCount>
+                        <TotalDebitEntryAmount><!-- CAMPO: r.EQUIV_EUR_AMOUNT total remesas débito --></TotalDebitEntryAmount>
+                        <TotalCreditEntryAmount><!-- CAMPO: total remesas crédito (0 si solo débito) --></TotalCreditEntryAmount>
+                    </BulkPaymentMetadata>
+
+                    <!--
+                        TrxMonitoredParty: el ordenante principal del lote (parte monitorizada).
+                        Para remesas: el cliente que origina las transferencias.
+                    -->
+                    <TrxMonitoredParty>
+                        <TrxPartyData>
+                            <Name><!-- CAMPO: c.FULL_NAME - nombre del ordenante --></Name>
+                            <LastName><!-- OPCIONAL: apellido separado --></LastName>
+                            <PaymentSchemePartyId><!-- CAMPO: c.INTERNAL_CIF - ID cliente en sistema de pagos --></PaymentSchemePartyId>
+                        </TrxPartyData>
+                    </TrxMonitoredParty>
+
+                    <!--
+                        CustomData a nivel BulkPayment.
+                        Acordar con NICE qué campos propietarios del lote mapear aquí.
+                    -->
+                    <!-- <CustomData><Cs1>...</Cs1></CustomData> -->
+
+                    <Entries>
+                        <!-- Repetir <Entry> por cada remesa individual del lote -->
+                        <Entry>
+                            <!--
+                                BaseTransactionB: identificación de la entry (remesa individual).
+                                AccountKey: clave de la cuenta ordenante en IFM.
+                            -->
+                            <BaseTransactionB>
+                                <AccountKey><!-- clave de la cuenta del ordenante en IFM --></AccountKey>
+                                <!-- <OverrideTypeCd>código de override si aplica</OverrideTypeCd> -->
+                            </BaseTransactionB>
+
+                            <!--
+                                BaseTransactionC: identificación única de la transacción.
+                                TransactionKey debe ser único por remesa en todo el sistema.
+                            -->
+                            <BaseTransactionC>
+                                <TransactionKey><!-- CAMPO: r.TRN_ID - referencia única de la remesa --></TransactionKey>
+                                <TransactionType>INTERNATIONAL</TransactionType>  <!-- DOMESTIC | INTERNATIONAL -->
+                                <TransactionOriginationSystemCd>CORE_BANKING</TransactionOriginationSystemCd>
+                            </BaseTransactionC>
+
+                            <!--
+                                MonetaryTransactionB: datos operativos de la remesa individual.
+                                TransactionId: referencia de negocio (puede coincidir con TRN_ID).
+                                FundsDirectionCd: O=Outgoing (saliente), I=Incoming (entrante).
+                            -->
+                            <MonetaryTransactionB>
+                                <TransactionId><!-- CAMPO: r.TRN_ID o r.UETR --></TransactionId>
+                                <FundsDirectionCd>O</FundsDirectionCd>  <!-- O=saliente, I=entrante -->
+                                <PayeeAccountKey><!-- clave de la cuenta beneficiaria en IFM (si existe) --></PayeeAccountKey>
+                                <PayeePartyKey><!-- clave del beneficiario en IFM (si existe) --></PayeePartyKey>
+                                <OppAccountKey><!-- clave de la cuenta contraria en IFM (si existe) --></OppAccountKey>
+                                <Memo><!-- CAMPO: REPLACE(r.REMITTANCE_INFO, '|', ' ') - concepto de la remesa --></Memo>
+                                <PayeeDataAccountNumber><!-- CAMPO: r.BENEFICIARY_ACCOUNT - cuenta beneficiaria --></PayeeDataAccountNumber>
+                                <IsTrxOnUs>0</IsTrxOnUs>  <!-- 1 si el beneficiario es cliente del mismo banco -->
+                                <AddendaRecordCount>0</AddendaRecordCount>
+                                <!-- OPCIONAL:
+                                <IsTruncated>0</IsTruncated>
+                                <IsRedeposit>0</IsRedeposit>
+                                -->
+                            </MonetaryTransactionB>
+
+                            <!--
+                                AccountReference: datos de la cuenta del ordenante (nivel entry).
+                                AccountNumber en TrxMonitoredAccount es más específico para el IBAN;
+                                AccountReference se usa para datos del perfil de cuenta en IFM.
+                            -->
+                            <AccountReference>
+                                <AccountData>
+                                    <AccountName><!-- CAMPO: c.FULL_NAME - nombre del titular --></AccountName>
+                                    <AccountType><!-- tipo de cuenta ordenante, ej: CHECKING | SAVINGS --></AccountType>
+                                    <PrimaryPartyKey><!-- clave del cliente ordenante en IFM --></PrimaryPartyKey>
+                                    <!-- OPCIONAL:
+                                    <LedgerBalance>saldo</LedgerBalance>
+                                    <OpenDate>fecha apertura cuenta</OpenDate>
+                                    <Status>ACTIVE</Status>
+                                    -->
+                                </AccountData>
+                                <!-- AddressData, ContactData, ReferenceUpdateDates omitidos: no usados por analytics -->
+                                <AccountPartyRelationData>
+                                    <PartyRelationType>OWNER</PartyRelationType>
+                                </AccountPartyRelationData>
+                            </AccountReference>
+
+                            <!--
+                                Amount: importes de la remesa.
+                                OriginalAmount: importe en divisa de origen.
+                                NormalizedOriginalAmount: equivalente en EUR.
+                                AccountAmount: importe que se debita en la cuenta del ordenante.
+                                OppAccountAmount: importe que se acredita en la cuenta del beneficiario.
+                            -->
+                            <Amount>
+                                <OriginalCurrencyCd><!-- CAMPO: r.CURRENCY - ISO 4217, ej: EUR, USD, GBP --></OriginalCurrencyCd>
+                                <OriginalAmount><!-- CAMPO: r.AMOUNT --></OriginalAmount>
+                                <NormalizedOriginalAmount><!-- CAMPO: r.EQUIV_EUR_AMOUNT --></NormalizedOriginalAmount>
+                                <AccountAmount><!-- CAMPO: r.AMOUNT (importe debitado en cuenta ordenante) --></AccountAmount>
+                                <OppAccountAmount><!-- CAMPO: importe acreditado al beneficiario (neto de comisiones) --></OppAccountAmount>
+                            </Amount>
+
+                            <!--
+                                PayeeAccountReference: datos de la cuenta del beneficiario.
+                            -->
+                            <PayeeAccountReference>
+                                <AccountData>
+                                    <AccountName><!-- CAMPO: r.BENEFICIARY_NAME --></AccountName>
+                                    <AccountType><!-- tipo de cuenta beneficiario si se conoce --></AccountType>
+                                    <!-- OPCIONAL: otros campos de perfil de cuenta beneficiaria -->
+                                </AccountData>
+                                <AddressData>
+                                    <AddressLine1><!-- CAMPO: r.RECEIVER_ADDRESS --></AddressLine1>
+                                    <CountryCd><!-- CAMPO: r.RECEIVER_COUNTRY - ISO 3166-1 alpha-2 --></CountryCd>
+                                </AddressData>
+                                <AccountPartyRelationData>
+                                    <PartyRelationType>OWNER</PartyRelationType>
+                                </AccountPartyRelationData>
+                            </PayeeAccountReference>
+
+                            <!--
+                                PayeePartyReference: datos KYC del beneficiario (Travel Rule FATF R.16).
+                            -->
+                            <PayeePartyReference>
+                                <PartyData>
+                                    <Name><!-- CAMPO: r.BENEFICIARY_NAME --></Name>
+                                    <PartyType>INDIVIDUAL</PartyType>  <!-- INDIVIDUAL | ORGANIZATION -->
+                                    <!-- OPCIONAL:
+                                    <LastName>apellido beneficiario</LastName>
+                                    <TaxId>NIF/identificación beneficiario</TaxId>
+                                    -->
+                                </PartyData>
+                                <AddressData>
+                                    <AddressLine1><!-- CAMPO: r.RECEIVER_ADDRESS --></AddressLine1>
+                                    <CountryCd><!-- CAMPO: r.RECEIVER_COUNTRY --></CountryCd>
+                                </AddressData>
+                            </PayeePartyReference>
+
+                            <!--
+                                TransferTransaction: detalles de la transferencia.
+                                PaymentSpeedCd: 1=Standard, 2=Express/Instant.
+                            -->
+                            <TransferTransaction>
+                                <PaymentSpeedCd>1</PaymentSpeedCd>  <!-- 1=Standard, 2=Express -->
+                                <ExecutionDate><!-- CAMPO: r.VALUE_DATE - fecha valor YYYY-MM-DDThh:mm:ss+HH:MM --></ExecutionDate>
+                                <IsStandingOrder>0</IsStandingOrder>
+                                <IsLastTransactionInBatch><!-- 1 si es la última entry del bulk --></IsLastTransactionInBatch>
+                                <EmailNotificationInd>0</EmailNotificationInd>
+                                <CreatedFromTemplateInd>0</CreatedFromTemplateInd>
+                                <IsAddEditPayee>0</IsAddEditPayee>
+                                <IsEbill>0</IsEbill>
+                                <!-- OPCIONAL:
+                                <NumberOfApproversRequired>número de aprobadores</NumberOfApproversRequired>
+                                <PayeeCreateUpdateDate>fecha alta/modificación beneficiario</PayeeCreateUpdateDate>
+                                -->
+                            </TransferTransaction>
+
+                            <!--
+                                TrxMonitoredAccount: datos de la cuenta del ordenante a nivel transacción.
+                                AccountNumber: IBAN o cuenta local del ordenante.
+                                RoutingNumber: BIC/SWIFT del banco ordenante.
+                                RoutingType: tipo de routing (SWIFT, SEPA, ABA...).
+                            -->
+                            <TrxMonitoredAccount>
+                                <TrxAccountData>
+                                    <AccountNumber><!-- CAMPO: c.ACCOUNT_IBAN --></AccountNumber>
+                                    <AccountName><!-- CAMPO: c.FULL_NAME --></AccountName>
+                                    <AccountType><!-- tipo de cuenta ordenante --></AccountType>
+                                    <CurrencyCd><!-- CAMPO: r.CURRENCY --></CurrencyCd>
+                                    <FiName><!-- nombre del banco ordenante, ej: BANCOES --></FiName>
+                                    <RoutingNumber><!-- CAMPO: r.SENDER_BIC --></RoutingNumber>
+                                    <RoutingType>SWIFT</RoutingType>  <!-- SWIFT | SEPA | ABA | SORT_CODE -->
+                                    <BranchCountryCd><!-- CAMPO: c.COUNTRY_CODE --></BranchCountryCd>
+                                    <!-- OPCIONAL: <AvailableBalance>saldo disponible</AvailableBalance> -->
+                                </TrxAccountData>
+                            </TrxMonitoredAccount>
+
+                            <!--
+                                TrxPartyAddress: dirección del ordenante a nivel transacción (Travel Rule).
+                            -->
+                            <TrxPartyAddress>
+                                <AddressData>
+                                    <AddressLine1><!-- CAMPO: c.ADDRESS --></AddressLine1>
+                                    <CountryCd><!-- CAMPO: c.COUNTRY_CODE --></CountryCd>
+                                </AddressData>
+                            </TrxPartyAddress>
+
+                            <!--
+                                TrxPayeeAccount: datos de la cuenta del beneficiario a nivel transacción.
+                                RoutingNumber: BIC/SWIFT del banco beneficiario.
+                            -->
+                            <TrxPayeeAccount>
+                                <TrxAccountData>
+                                    <AccountNumber><!-- CAMPO: r.BENEFICIARY_ACCOUNT --></AccountNumber>
+                                    <AccountName><!-- CAMPO: r.BENEFICIARY_NAME --></AccountName>
+                                    <CurrencyCd><!-- divisa de la cuenta beneficiaria --></CurrencyCd>
+                                    <FiName><!-- nombre del banco beneficiario --></FiName>
+                                    <RoutingNumber><!-- CAMPO: r.RECEIVER_BIC --></RoutingNumber>
+                                    <RoutingType>SWIFT</RoutingType>
+                                    <BranchCountryCd><!-- CAMPO: r.RECEIVER_COUNTRY --></BranchCountryCd>
+                                </TrxAccountData>
+                            </TrxPayeeAccount>
+
+                            <!--
+                                TrxPayeeParty: datos del beneficiario a nivel transacción.
+                                PaymentSchemePartyId: identificador del beneficiario en el esquema de pagos.
+                            -->
+                            <TrxPayeeParty>
+                                <TrxPartyData>
+                                    <Name><!-- CAMPO: r.BENEFICIARY_NAME --></Name>
+                                    <PaymentSchemePartyId><!-- CAMPO: r.BENEFICIARY_ACCOUNT o ID externo --></PaymentSchemePartyId>
+                                </TrxPartyData>
+                            </TrxPayeeParty>
+
+                            <!--
+                                TrxPayeeAddress: dirección del beneficiario (Travel Rule FATF R.16).
+                            -->
+                            <TrxPayeeAddress>
+                                <AddressData>
+                                    <AddressLine1><!-- CAMPO: r.RECEIVER_ADDRESS --></AddressLine1>
+                                    <CountryCd><!-- CAMPO: r.RECEIVER_COUNTRY --></CountryCd>
+                                </AddressData>
+                            </TrxPayeeAddress>
+
+                            <!--
+                                CustomData a nivel Entry: campos propietarios de la remesa individual.
+                                Acordar con NICE qué campos mapear. Ejemplos:
+                                  Cs1 → r.TXN_TYPE (REMESA/WIRE/SEPA_SCT)
+                                  Cs2 → r.PURPOSE_CODE (FAMI/SALA/TRAD...)
+                                  Cs3 → r.PAYMENT_METHOD (SWIFT_MT103/PACS008/SEPA_CT)
+                                  Cs4 → r.CHARGE_TYPE (OUR/SHA/BEN)
+                                  Cs5 → r.UETR
+                                  Cs6 → r.REGULATORY_INFO (campo :77B: MT103)
+                                  Cs7 → r.INTERMEDIARY_BIC
+                                  Cb1 → c.PEP_FLAG (0/1)
+                                  Cb2 → HIGH_RISK_COUNTRY (0/1)
+                                  Cb3 → r.SANCTIONS_PRE_SCREENED (0/1)
+                                  Cn1 → r.FX_RATE
+                            -->
+                            <CustomData>
+                                <Cs1><!-- r.TXN_TYPE --></Cs1>
+                                <Cs2><!-- r.PURPOSE_CODE --></Cs2>
+                                <Cs3><!-- r.PAYMENT_METHOD --></Cs3>
+                                <Cs4><!-- r.CHARGE_TYPE --></Cs4>
+                                <Cs5><!-- r.UETR --></Cs5>
+                                <Cs6><!-- r.REGULATORY_INFO --></Cs6>
+                                <Cs7><!-- r.INTERMEDIARY_BIC --></Cs7>
+                                <Cb1><!-- c.PEP_FLAG: 1=PEP, 0=no PEP --></Cb1>
+                                <Cb2><!-- HIGH_RISK_COUNTRY: 1=sí, 0=no --></Cb2>
+                                <Cb3><!-- r.SANCTIONS_PRE_SCREENED: 1=ya screening WLF --></Cb3>
+                                <Cn1><!-- r.FX_RATE --></Cn1>
+                            </CustomData>
+
+                        </Entry>
+                        <!-- Añadir más <Entry> según sea necesario -->
+                    </Entries>
+
+                </BulkPayment>
+                <!-- Añadir más <BulkPayment> según sea necesario -->
+            </BulkPayments>
+
+        </LogicalGroup>
+    </LogicalGroups>
+</Request>
