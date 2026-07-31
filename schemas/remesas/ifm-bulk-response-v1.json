@@ -1,0 +1,239 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://actimize/schemas/remesas/ifm-bulk-response-v1.json",
+  "title": "IFM Bulk Payment Response Message",
+  "description": "Mensaje de respuesta que IFM-X construye en FF_bulkPaymentBuildResponseMessageExitPoint tras procesar un BulkPayment de remesas. Se serializa a cs1/responseMessage en base de datos y se entrega via MQ, REST o fichero.",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "header",
+    "bulkActions",
+    "bulkTriggeredRules",
+    "entries"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "const": "1.0",
+      "description": "Version del schema. Incrementar en cambios breaking."
+    },
+    "header": {
+      "type": "object",
+      "description": "Cabecera con identificadores y metricas globales del BulkPayment procesado.",
+      "required": [
+        "batchId",
+        "bulkTransactionKey",
+        "processingTimestamp",
+        "processingTimeMs",
+        "validEntriesCount",
+        "invalidEntriesCount",
+        "totalEntries",
+        "bulkRiskScore",
+        "isAlertGenerated"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "batchId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "description": "Identificador del batch tal como viene en el fichero XML de entrada (atributo BatchId del BulkPayment)."
+        },
+        "bulkTransactionKey": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Clave interna de IFM-X para este BulkPayment. Correlaciona con ff_bulk_access.log y tablas IFM."
+        },
+        "processingTimestamp": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Momento en que IFM finalizo el procesamiento. ISO-8601 con timezone, e.g. 2026-07-31T10:23:45.123+02:00."
+        },
+        "processingTimeMs": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Tiempo total de procesamiento del BulkPayment en milisegundos, desde recepcion hasta fin de Policy Manager."
+        },
+        "validEntriesCount": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Numero de entries que IFM proceso correctamente (entradas validas segun validacion XSD y reglas IFM)."
+        },
+        "invalidEntriesCount": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Numero de entries rechazadas por validacion (faltaban campos obligatorios, formato incorrecto, etc.)."
+        },
+        "totalEntries": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Total de entries recibidas en el XML = validEntriesCount + invalidEntriesCount. Corresponde a totalNumberOfBulkPaymentEntries del UDT."
+        },
+        "bulkRiskScore": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100,
+          "description": "Score maximo entre todas las entries validas. Corresponde a actimizeAnalyticsScore del UDT del exit point. Es el dato de mayor peso para la decision global."
+        },
+        "isAlertGenerated": {
+          "type": "boolean",
+          "description": "true si el Policy Manager genero al menos una alerta para este BulkPayment o alguna de sus entries."
+        }
+      }
+    },
+    "bulkActions": {
+      "type": "array",
+      "description": "FinalActions del Policy Manager a nivel BulkPayment (actionRulesResults del UDT raiz). Estas acciones aplican al conjunto, no a entries individuales.",
+      "items": {
+        "$ref": "#/definitions/action"
+      }
+    },
+    "bulkTriggeredRules": {
+      "type": "array",
+      "description": "Reglas de scoring disparadas a nivel BulkPayment (scoringRulesResults del UDT raiz).",
+      "items": {
+        "$ref": "#/definitions/triggeredRule"
+      }
+    },
+    "entries": {
+      "type": "array",
+      "description": "Detalle por cada entry valida procesada por IFM. Las entries invalidas se omiten; su conteo esta en header.invalidEntriesCount.",
+      "items": {
+        "$ref": "#/definitions/entry"
+      }
+    }
+  },
+  "definitions": {
+    "action": {
+      "type": "object",
+      "description": "FinalAction del Policy Manager. Corresponde a un elemento de actionRulesResults en el UDT de IFM.",
+      "required": ["name", "value"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Nombre de la accion tal como esta definida en el Policy Manager (campo Name del actionRulesResults)."
+        },
+        "value": {
+          "type": "string",
+          "description": "Valor final resuelto por el Policy Manager para esta accion (campo Value). Puede ser vacio si la regla no disparo."
+        },
+        "originalValue": {
+          "type": "string",
+          "description": "Valor antes de ser modificado por una regla de override (campo OriginalValue). Presente solo si difiere de value."
+        },
+        "triggeredRules": {
+          "type": "array",
+          "description": "Nombres de las reglas del Policy Manager que contribuyeron a determinar este valor.",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "triggeredRule": {
+      "type": "object",
+      "description": "Regla de scoring que se disparo durante el analisis. Corresponde a un elemento de scoringRulesResults.",
+      "required": ["ruleName", "score"],
+      "additionalProperties": false,
+      "properties": {
+        "ruleName": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Nombre de la regla de scoring en IFM."
+        },
+        "score": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100,
+          "description": "Score que aporto esta regla."
+        },
+        "description": {
+          "type": "string",
+          "description": "Descripcion opcional del motivo de disparo, util para debugging y auditoria."
+        }
+      }
+    },
+    "riskLevelCode": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 6,
+      "description": "Codigo numerico del nivel de riesgo asignado por IFM al transaction. Escala: 1=Very High, 2=High, 3=Medium High, 4=Medium Low, 5=Low, 6=Very Low."
+    },
+    "riskLevelLabel": {
+      "type": "string",
+      "enum": [
+        "Very High",
+        "High",
+        "Medium High",
+        "Medium Low",
+        "Low",
+        "Very Low"
+      ],
+      "description": "Etiqueta textual correspondiente al riskLevelCode."
+    },
+    "decision": {
+      "type": "string",
+      "enum": ["BLOCK", "REVIEW", "APPROVE"],
+      "description": "Decision recomendada derivada del riskLevel. BLOCK: riskLevel 1-2. REVIEW: riskLevel 3. APPROVE: riskLevel 4-6."
+    },
+    "entry": {
+      "type": "object",
+      "description": "Resultado del analisis IFM para una entry individual del BulkPayment.",
+      "required": [
+        "transactionKey",
+        "transactionId",
+        "riskLevelCode",
+        "riskLevelLabel",
+        "riskScore",
+        "decision",
+        "entryActions",
+        "entryTriggeredRules"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "transactionKey": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Clave interna de IFM para esta transaction entry. Permite correlacionar con logs y BD IFM."
+        },
+        "transactionId": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Identificador de la transaccion tal como viene en el XML de entrada (EndToEndId o equivalente del feed)."
+        },
+        "riskLevelCode": {
+          "$ref": "#/definitions/riskLevelCode"
+        },
+        "riskLevelLabel": {
+          "$ref": "#/definitions/riskLevelLabel"
+        },
+        "riskScore": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100,
+          "description": "Score numerico de riesgo calculado por Actimize Analytics para esta entry (actimizeTransactionRiskScore del UDT)."
+        },
+        "decision": {
+          "$ref": "#/definitions/decision"
+        },
+        "entryActions": {
+          "type": "array",
+          "description": "FinalActions del Policy Manager para esta entry especifica.",
+          "items": {
+            "$ref": "#/definitions/action"
+          }
+        },
+        "entryTriggeredRules": {
+          "type": "array",
+          "description": "Reglas de scoring disparadas para esta entry.",
+          "items": {
+            "$ref": "#/definitions/triggeredRule"
+          }
+        }
+      }
+    }
+  }
+}
