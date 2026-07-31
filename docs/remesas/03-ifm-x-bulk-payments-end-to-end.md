@@ -524,7 +524,186 @@ Rotación automática: nuevo fichero al superar **20 MB**, nombrado `ff_bulk_acc
 
 ---
 
-## 15. Preguntas Pendientes de Confirmar con NICE/Implementador
+## 15. Flujo de Respuesta — End-to-End Completo
+
+Con la respuesta se cierra el ciclo. El flujo completo queda así:
+
+```
+Core Bancario
+      │ XML file
+      ▼
+Input Folder ──→ AIS (no-parse) ──→ Intermediate Folder
+                                           │
+                              Validación XSD + Parsing
+                                           │
+                              ┌────────────▼────────────────────────┐
+                              │    MOTOR IFM-X (por cada Bulk Payment)    │
+                              │                                      │
+                              │  Entries Service                     │
+                              │    └─ Entry Data Integration EP      │
+                              │    └─ Internal Detection             │
+                              │    └─ Entry Scoring Rules            │
+                              │    └─ Entry Policy Manager EP        │
+                              │                                      │
+                              │  Bulk Payment Service                │
+                              │    └─ Bulk Scoring Rules             │
+                              │    └─ Bulk Policy Manager            │
+                              └────────────┬────────────────────────┘
+                                           │
+                              ┌────────────▼────────────────────────┐
+                              │  BUILD RESPONSE EXIT POINT           │
+                              │  FF_bulkPaymentBuildResponseMessage  │
+                              │  ExitPoint  (SÍNCRONO siempre)       │
+                              │                                      │
+                              │  Construye el mensaje de respuesta   │
+                              │  con scores, risk levels, acciones   │
+                              └──┬─────────────────────┬────────────┘
+                                 │ GUARDA               │ GUARDA
+                                 ▼ (síncrono)           ▼ (asíncrono)
+                        FF_TRX_CALC_DATA          ARD_RESULT (IDB)
+                        (app database)            (para consulta posterior)
+                                 │
+                              ┌──▼──────────────────────────────────┐
+                              │  NOTIFY CLIENT EXIT POINT            │
+                              │  FF_bulkPaymentNotifyResponseMessage │
+                              │  ExitPoint  (sync por defecto)       │
+                              │                                      │
+                              │  Notifica al sistema cliente         │
+                              │  (WS call, AMQ message, fichero...)  │
+                              └─────────────────────────────────────┘
+                                           │
+                              ┌────────────▼────────────────────────┐
+                              │         Processed Folder             │
+                              └─────────────────────────────────────┘
+```
+
+### Dos exit points, dos responsabilidades distintas
+
+| Exit Point | Cuándo se llama | Para qué |
+|-----------|----------------|----------|
+| `FF_bulkPaymentBuildResponseMessageExitPoint` | **Antes** de guardar en BD — síncrono siempre | Construir el mensaje de respuesta a partir de scores, acciones y resultados |
+| `FF_bulkPaymentNotifyResponseMessageExitPoint` | **Después** de guardar — sync o async según config | Enviar/notificar la respuesta al sistema cliente |
+
+**Respuesta por bulk:** Hay una respuesta independiente por cada bulk payment dentro del fichero, no una respuesta por fichero.
+
+**Persistencia de la respuesta** (por si el bulk se reenvía o el cliente la consulta más tarde):
+- `FF_TRX_CALC_DATA` (application database) — guardado **síncrono**
+- `ARD_RESULT` (IDB) — guardado **asíncrono**
+
+---
+
+## 16. Build Response Exit Point
+
+**Ubicación:** `Fraud Framework - Customization/Data Integration/Outgoing Data Integration/Outgoing Data Integration Exit Points/`
+
+### Entrada: `FF_bulkPaymentBuildResponseMessageExitPointIn`
+
+#### Datos del Bulk Payment
+
+| Campo | Tipo | Descripción |
+|-------|------|-------------|
+| `bulkPayment` (FF_bulkPaymentResponseData) | UDT | Contenedor de datos de respuesta del bulk |
+| → `validEntriesCount` | Integer | Nº de entries válidas en el bulk |
+| → `invalidEntriesCount` | Integer | Nº de entries inválidas |
+| → `totalNumberOfBulkPaymentEntries` | Integer | Total de entries en el bulk |
+| `bulkPaymentFeed` (FF_enrichedMasterFeed) | UDT | Campos completos del bulk (cliente + implementación + calculados) |
+| `bulkPaymentResults` (FF_bulkPaymentResults) | UDT | Resultados del bulk |
+| → `actimizeAnalyticsScore` | Double | **Score máximo asignado a cualquier entry individual del bulk** |
+| → `userAnalyticsScore` | Double | Score de user analytics — actualmente `null` |
+| → `isAlertGenerated` | Boolean | Si se generó alguna alerta de bulk payment |
+| → `actimizeAnalyticsResults` | UDT | Issues de analytics — actualmente `null` |
+| → `actionRulesResults` (FF_actionRulesResults) | UDT | Resultados del Policy Manager de detección |
+| → → `FinalActions` | Set | `Name`, `Value`, `OriginalValue` — acciones tras resolución de conflictos |
+| → → `TriggeredRules` | Set | Reglas disparadas desde user-defined analytics |
+| → `scoringRulesResults` (FF_scoringRulesResults) | UDT | Scoring rules disparadas y sus scores |
+| → `analyticsVariables` | UDT | Variables de analytics — actualmente `null` |
+
+#### Datos de cada Entry válida (`Entries` SET)
+
+| Campo | Tipo | Descripción |
+|-------|------|-------------|
+| `entry` (FF_entryResponseData) | UDT | Datos de respuesta de cada entry válida |
+| → `bulkPaymentEntryFeed` (FF_enrichedMasterFeed) | UDT | Campos completos de la entry (cliente + implementación + calculados) |
+| → `entryResults` (FF_entryResults) | UDT | Resultados de la entry |
+| → → `actimizeTransactionRiskScore` | Boolean | Score de analytics Actimize de la entry |
+| → → `userAnalyticsScore` | Double | Score user analytics — actualmente `null` |
+| → → `riskLevel` | Integer | Nivel de riesgo (ver tabla abajo) |
+| → → `actimizeAnalyticsResults` | UDT | Issues de analytics de la entry |
+| → → `actionRulesResults` | Set | Policy Manager de la entry: `FinalActions`, `TriggeredRules` |
+| → → `scoringRulesResults` | Set | Scoring rules de la entry |
+| → → `analyticsVariables` | UDT | Variables de analytics — actualmente `null` |
+
+#### Tabla de Risk Level por entry
+
+| Valor | Nivel de riesgo |
+|-------|----------------|
+| `1` | Very High |
+| `2` | High |
+| `3` | Medium |
+| `4` | Low |
+| `5` | Very Low |
+| `6` | Unknown |
+
+> **Para remesas:** El `riskLevel` de cada entry es el campo central para decidir si una remesa pasa, se bloquea o va a revisión manual en ActOne. Combinarlo con `actimizeTransactionRiskScore` y las `FinalActions` del Policy Manager.
+
+### Salida
+
+El exit point construye la respuesta que IFM persistirá en BD. La respuesta se almacena como string en `cs1`/`cs2`/`responseMessage` y es lo que recibe el Notify exit point.
+
+---
+
+## 17. Notify Client Exit Point
+
+### Entrada: `FF_bulkPaymentNotifyResponseMessageExitPointIn`
+
+| Campo | Tipo | Descripción |
+|-------|------|-------------|
+| `isResend` | Boolean | `true` si la respuesta es un reenvío (bulk ya procesado anteriormente) |
+| `BulkPaymentResponseMessage` (FF_bulkPaymentResponseMessage) | UDT | El mensaje de respuesta completo |
+| → `cs1` | Char | String de respuesta construido en el Build Response exit point |
+| → `cs2` | Char | String de respuesta construido en el Build Response exit point |
+| → `responseMessage` | Char | El mensaje de respuesta tal como se guardó en BD |
+
+**Sin salida** — este exit point no tiene output.
+
+### Sync vs. Async — decisión de implementación
+
+| Modo | Cuándo usarlo | Comportamiento ante fallo |
+|------|--------------|--------------------------|
+| **sync** (defecto) | Implementación simple / notificación local | IFM logea el error y continúa — el bulk se marca como completado igualmente |
+| **async** | Llamada a WS externo / operación lenta / propensa a fallos | AMQ reintenta `FF_amqBPNotifyMessageNumberOfMessageHandlingRetries` veces antes de descartar y loguear |
+
+> **Riesgo async:** El bulk puede haberse procesado correctamente pero la notificación llega tarde por backlog en la cola AMQ.
+
+---
+
+## 18. Configuración de la Respuesta
+
+### `FF_applicationConfig.ini` (en cada instancia AIS)
+
+| Parámetro | Default | Descripción |
+|-----------|---------|-------------|
+| `FF_batchBulkPaymentResponseMessageMode` | `sync` | Modo de ejecución del Notify Client exit point: `sync` \| `async` |
+| `FF_amqBPNotifyMessageNumberOfMessageHandlingRetries` | `3` | (Solo async) Reintentos AMQ antes de descartar el mensaje |
+| `FF_amqBPNotifyMessageConsumerNumOfMessagesUntilAutoCommit` | `1` | (Solo async) Mensajes por commit en el consumer AMQ |
+| `FF_amqBPNotifyMessageConsumerNumOfMessagesToSendToMsgHandler` | `1` | (Solo async) Mensajes enviados al handler por lote |
+
+### `FF_environmentConfig.ini` (en cada instancia AIS)
+
+| Parámetro | Default | Descripción |
+|-----------|---------|-------------|
+| `FF_AMQ_BulkPaymentNotifyResponse_NumberOfConcurrentThreads` | `1` | (Solo async) Hilos del listener AMQ para la respuesta |
+
+### Arrancar el listener de respuesta (solo si modo async)
+
+```
+Execution Plan: FF_startBulkPaymentNotifyResponseQueueListener
+Ubicación: Batch Processes/BulkPayments/ — paquete Fraud Framework - Executables
+```
+
+---
+
+## 19. Preguntas Pendientes de Confirmar con NICE/Implementador
 
 1. **Esquema XSD**: ¿Tenemos acceso al `Interfaces/XSD/Bulk Payments Process/` de la instalación IFM? Necesitamos el XSD para generar XML válido.
 2. **Master Feed Excel**: ¿Disponemos del fichero Excel con el mapeo de campos (columna `Element Name In Hierarchical Input`)?
