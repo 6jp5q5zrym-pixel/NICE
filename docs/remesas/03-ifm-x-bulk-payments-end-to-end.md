@@ -158,23 +158,26 @@ La fuente predefinida para XML es `FF_FOLDER_evaluateBulkPaymentsXml_V1`.
 
 ---
 
-## 6. Estructura de Carpetas en el Servidor IFM (Windows)
+## 6. Estructura de Carpetas en el Servidor IFM (Windows) — Rutas Reales
 
 ```
-C:\Actimize\IFM\BulkPayments\        ← Root folder
-├── XML\
-│   ├── Input\                        ← Depositar aquí los ficheros .xml
-│   ├── Intermediate\                 ← IFM mueve el fichero aquí durante el proceso
-│   └── Processed\                    ← IFM mueve el fichero aquí al terminar
-├── NACHA\
-│   ├── Input\
-│   ├── Intermediate\
-│   └── Processed\
-└── HybridNACHA\
-    ├── Splitter\Input\               ← Solo si se usa el file splitter
-    ├── Input\
-    ├── Intermediate\
-    └── Processed\
+C:\Actimize\ais_server\Instances\Actimize_IFM_RT1\      ← Instancia AIS
+│
+├── AdditionalFiles\BulkPaymentProcess\                  ← Root folder bulk payments
+│   └── XML\
+│       ├── Input\        ← Depositar aquí los ficheros .xml generados por Core Banking
+│       ├── Intermediate\ ← IFM mueve el fichero aquí mientras lo procesa
+│       └── Processed\    ← IFM mueve el fichero aquí al terminar correctamente
+│
+├── FF_environmentConfig.ini           ← Hilos, parámetros de entorno IFM
+├── FF_environmentConfigImpl.ini       ← Configuración custom del implementador
+├── FF_applicationConfig.ini           ← Parámetros IFM (heap, bulk mode, response mode)
+├── FF_bulkPaymentsProcessesConfig.xml ← Fuentes bulk (carpetas, encoding, source name)
+├── ais_config.xml                     ← JVM de AIS (heap, GC, Akka)
+├── ais_broker_config.xml              ← ActiveMQ broker (memory, store, temp limits)
+└── logs\
+    └── access_logs\
+        └── ff_bulk_access.log         ← Métricas por bulk payment procesado
 ```
 
 > **Regla de aislamiento (Huge Bulk Mode):** Si hay múltiples instancias AIS o procesos bulk con carpeta de input compartida, cada instancia/proceso debe tener sus propias carpetas `Intermediate` y `Processed` separadas.
@@ -499,7 +502,7 @@ Los access logs registran métricas de rendimiento y estado de **cada bulk payme
 ### Ubicación
 
 ```
-<AIS_instance_folder>\logs\access_logs\ff_bulk_access.log
+C:\Actimize\ais_server\Instances\Actimize_IFM_RT1\logs\access_logs\ff_bulk_access.log
 ```
 
 Rotación automática: nuevo fichero al superar **20 MB**, nombrado `ff_bulk_access.log1`, `ff_bulk_access.log2`, etc. IFM no elimina los ficheros automáticamente — gestión de retención a cargo del equipo de operaciones.
